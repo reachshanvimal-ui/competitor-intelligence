@@ -1,19 +1,22 @@
 /**
- * /api/six-pager — Claude writes a proper Amazon-style 6-page narrative doc.
- * Returns { html: "..." } — the browser downloads it as .doc
+ * /api/six-pager — streams an Amazon-style 6-pager HTML document from Claude.
  *
- * Amazon 6-pager rules enforced in the prompt:
- * - No bullet points in the body (prose only)
- * - Short paragraphs (3-5 sentences max)
- * - Data-backed assertions; estimates labelled (est.)
- * - Present tense for current state, past tense for history
- * - Sections: Context → Competitive Landscape → Recent Moves →
- *             Walmart's Position → Implications → Recommended Actions
- * - Appendix: comparison table
+ * Mirrors the streaming pattern from analyze.js to avoid edge-function
+ * timeouts (a full 6-pager takes ~45s — streaming keeps the connection alive).
+ *
+ * Claude writes raw HTML directly (no JSON wrapper).
+ * The browser collects the SSE stream, assembles the HTML, and downloads it.
  */
 export default async (request) => {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: cors() });
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin":  "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
   }
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
@@ -26,81 +29,92 @@ export default async (request) => {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return new Response("Missing API key", { status: 500 });
 
-  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const today = new Date().toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  });
 
   const SYSTEM = `You are a strategic writer producing an Amazon-style 6-pager competitive intelligence memo.
 
-Amazon 6-pager rules (non-negotiable):
-1. NO bullet points in body sections — write in clear, flowing prose paragraphs
-2. Max 3-5 sentences per paragraph. Be direct. Cut every word that adds no meaning.
-3. Every claim must be backed by a number or specific fact. Label estimates (est.).
+OUTPUT FORMAT: Return a complete, self-contained HTML document. No JSON. No markdown. Raw HTML only.
+
+AMAZON 6-PAGER RULES (non-negotiable):
+1. No bullet points in body sections — flowing prose paragraphs only.
+2. Max 3-5 sentences per paragraph. Cut every word that adds no meaning.
+3. Every claim backed by a number or specific fact. Label estimates (est.).
 4. Present tense for current state. Past tense for historical events.
-5. The document must be exactly 6 pages when printed at 11pt Calibri, 1" margins.
-6. Voice: confident, direct, executive. No hedging. No jargon.
-7. Bullets ONLY allowed in the Appendix comparison table.
+5. Voice: confident, direct, executive. No hedging. No jargon.
 
-Return ONLY a JSON object with one field: { "html": "<complete HTML document string>" }
+HTML REQUIREMENTS:
+- All CSS inline (no external stylesheets or <link> tags)
+- font-family: Calibri, 'Segoe UI', sans-serif throughout
+- body: font-size:11pt; line-height:1.6; margin:1in; color:#1a1a1a; max-width:7.5in
+- Memo header: small table, monospace labels, top of page 1
+- h1 (doc title): font-size:16pt; font-weight:700; color:#0f172a; margin-bottom:4pt
+- h2 (section): font-size:13pt; font-weight:700; border-bottom:2px solid #2563eb;
+  padding-bottom:4pt; margin-top:28pt; color:#0f172a
+- h3 (company sub-heading): font-size:11pt; font-weight:700; color:#2563eb; margin-top:16pt
+- p: margin:6pt 0
+- Page breaks between major sections: <div style="page-break-after:always;height:0"></div>
+- Confidentiality notice after memo header (small, grey)
+- Appendix: comparison table with full borders, blue header row, alternating rows
 
-The HTML document must:
-- Use inline CSS only (no external stylesheets)
-- Font: font-family: Calibri, sans-serif
-- Body: font-size: 11pt, line-height: 1.5, margin: 1in on all sides
-- Heading 1 (section titles): font-size: 13pt, font-weight: bold, border-bottom: 1px solid #333, margin-top: 24pt
-- Heading 2 (sub-sections): font-size: 11pt, font-weight: bold, margin-top: 16pt
-- Paragraphs: margin: 6pt 0
-- Page breaks between major sections: <div style="page-break-after:always"></div>
-- Memo header at top (Amazon-style): To, From, Date, Re: fields in a small table
-- Confidentiality notice at bottom of page 1
-- Appendix: one comparison table at end with borders, alternating rows
+DOCUMENT STRUCTURE (exactly this order):
+1. MEMO HEADER TABLE — To: Leadership Team | From: AI Competitive Intelligence System | Date: ${today} | Re: [title]
+2. CONFIDENTIALITY NOTICE — one line, small grey text
+3. <h1>[Document Title]</h1>
+4. <h2>Context & Background</h2> — 2 paragraphs: why this landscape matters now
+5. <h2>Competitive Landscape</h2> — one <h3> per competitor, 2-3 paragraphs each:
+   their strategy, recent moves, key metrics, threat to Walmart
+6. PAGE BREAK
+7. <h2>Walmart's Current Position</h2> — honest 1-page assessment across focus areas
+8. <h2>Key Implications</h2> — specific risks (with probability/impact) and opportunities
+   (with sizing). Prose only. No bullets.
+9. PAGE BREAK
+10. <h2>Recommended Actions</h2> — 4-6 actions, each as its own <h3>.
+    For each: rationale (2-3 sentences), owner role, timeline. Prose only.
+11. <h2>Appendix: Comparison Table</h2> — HTML table, columns: Focus Area + one per company`;
 
-Structure (in this exact order):
-1. MEMO HEADER — To: Leadership Team | From: AI Competitive Intelligence | Date: [date] | Re: [title]
-2. CONTEXT & BACKGROUND — What is the competitive landscape? Why does this analysis matter now? (2 paragraphs)
-3. COMPETITIVE LANDSCAPE — One sub-section per competitor. 2-3 paragraphs each: their strategy, recent moves, key metrics, and threat level. (page break after)
-4. WALMART'S CURRENT POSITION — Where Walmart stands relative to each dimension analyzed. Honest assessment. (1 page)
-5. KEY IMPLICATIONS — What this means for Walmart. Specific risks with probability and impact. Specific opportunities with sizing. (1 page, page break after)
-6. RECOMMENDED ACTIONS — 4-6 actions. Each action: name it, explain the rationale (2-3 sentences), state the owner role, state the timeline. Prose, not bullets. (1 page)
-7. APPENDIX — Comparison table with borders. Columns: Focus Area + one per company. Rows: each focus area analyzed.`;
+  const userMsg = [
+    `Write a 6-pager for: "${title}"`,
+    `Competitors analysed: ${competitors.join(", ")}`,
+    `Date: ${today}`,
+    "",
+    "Use ALL insights from this source report:",
+    markdown,
+  ].join("\n");
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+  const anthropicResp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Api-Key": apiKey, "anthropic-version": "2023-06-01" },
+    headers: {
+      "Content-Type":      "application/json",
+      "X-Api-Key":         apiKey,
+      "anthropic-version": "2023-06-01",
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5", max_tokens: 8192, system: SYSTEM,
-      messages: [{
-        role: "user",
-        content: `Write a 6-pager for:\nTitle: ${title}\nDate: ${today}\nCompetitors analysed: ${competitors.join(", ")}\n\nSource report (use all insights from this):\n${markdown}`,
-      }],
+      model:      "claude-sonnet-4-5",
+      max_tokens: 8192,
+      stream:     true,
+      system:     SYSTEM,
+      messages:   [{ role: "user", content: userMsg }],
     }),
   });
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    return new Response(`Anthropic error ${resp.status}: ${err}`, { status: resp.status });
+  if (!anthropicResp.ok) {
+    const err = await anthropicResp.text();
+    return new Response(`Anthropic API error ${anthropicResp.status}: ${err}`, {
+      status: anthropicResp.status,
+    });
   }
 
-  const data = await resp.json();
-  const raw  = (data?.content?.[0]?.text ?? "")
-    .replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch {
-    // Claude occasionally returns raw HTML without the JSON wrapper — handle gracefully
-    if (raw.trim().startsWith("<!DOCTYPE") || raw.trim().startsWith("<html")) {
-      parsed = { html: raw };
-    } else {
-      return new Response(JSON.stringify({ error: "Invalid response from Claude", raw: raw.slice(0, 500) }),
-        { status: 500, headers: { "Content-Type": "application/json", ...cors() } });
-    }
-  }
-
-  return new Response(JSON.stringify(parsed), {
-    headers: { "Content-Type": "application/json", ...cors() },
+  /* Stream straight through — same pattern as analyze.js */
+  return new Response(anthropicResp.body, {
+    status: 200,
+    headers: {
+      "Content-Type":                "text/event-stream",
+      "Cache-Control":               "no-cache",
+      "Access-Control-Allow-Origin": "*",
+    },
   });
 };
-
-function cors() {
-  return { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type" };
-}
 
 export const config = { path: "/api/six-pager" };

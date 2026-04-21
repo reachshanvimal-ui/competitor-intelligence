@@ -501,34 +501,67 @@ function copyMD() {
   navigator.clipboard.writeText(currentMD).then(function() { alert("Copied \u2705"); });
 }
 
-/* ── Export Word (Amazon 6-pager via Claude) ─────────── */
+/* ── Export Word (Amazon 6-pager — streamed from Claude) ───── */
 async function exportWord() {
   if (!currentMD) return;
   var btn = document.getElementById("btn-word");
   btn.disabled = true; btn.textContent = "⏳ Writing 6-pager…";
 
-  var resp, data;
+  var resp;
   try {
     resp = await fetch("/api/six-pager", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        markdown: currentMD,
-        title: "Competitor Intelligence: " + currentComps.join(" vs "),
+        markdown:    currentMD,
+        title:       "Competitor Intelligence: " + currentComps.join(" vs "),
         competitors: currentComps,
       }),
     });
-    data = await resp.json();
   } catch (e) {
-    alert("6-pager error: " + e.message);
+    alert("Network error: " + e.message);
     btn.disabled = false; btn.textContent = "📄 Download Word"; return;
   }
 
-  if (!resp.ok || data.error) {
-    alert("Error: " + (data.error || resp.status));
+  if (!resp.ok) {
+    var errTxt = ""; try { errTxt = await resp.text(); } catch(_) {}
+    alert("6-pager error " + resp.status + ": " + errTxt.slice(0, 300));
     btn.disabled = false; btn.textContent = "📄 Download Word"; return;
   }
 
-  var html = data.html || "";
+  // Collect the SSE stream — same pattern as analyze()
+  var reader  = resp.body.getReader();
+  var decoder = new TextDecoder();
+  var buf = "", html = "";
+  btn.textContent = "⏳ Streaming 6-pager…";
+
+  try {
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var lines = buf.split("\n"); buf = lines.pop();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line.startsWith("data:")) continue;
+        var raw = line.slice(5).trim();
+        if (raw === "[DONE]") break;
+        var evt; try { evt = JSON.parse(raw); } catch(_) { continue; }
+        if (evt.type === "content_block_delta" && evt.delta && evt.delta.type === "text_delta") {
+          html += (evt.delta.text || "");
+        }
+      }
+    }
+  } catch (e) {
+    alert("Stream error: " + e.message);
+    btn.disabled = false; btn.textContent = "📄 Download Word"; return;
+  }
+
+  if (!html.trim()) {
+    alert("No content returned — please try again.");
+    btn.disabled = false; btn.textContent = "📄 Download Word"; return;
+  }
+
+  // Download as .doc (Word opens HTML .doc files natively)
   var blob = new Blob(["\ufeff" + html], { type: "application/msword" });
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
