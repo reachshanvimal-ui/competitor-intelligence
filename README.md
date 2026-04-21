@@ -3,7 +3,7 @@
 > 🔍 A free, open-source tool for retail & e-commerce competitive intelligence. 
 > Powered by Claude AI. Uses **only publicly available world knowledge** — no internal or proprietary data.
 
-**[🌐 Live Demo →](https://YOUR_NETLIFY_URL.netlify.app)**
+**[🌐 Live Demo →](https://competitor-intell.netlify.app)**
 
 ---
 
