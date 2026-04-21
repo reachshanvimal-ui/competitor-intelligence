@@ -501,273 +501,295 @@ function copyMD() {
   navigator.clipboard.writeText(currentMD).then(function() { alert("Copied \u2705"); });
 }
 
-/* ── Export Word ─────────────────────────────────────── */
-function exportWord() {
+/* ── Export Word (Amazon 6-pager via Claude) ─────────── */
+async function exportWord() {
   if (!currentMD) return;
-  var title = "Competitor Intelligence: " + currentComps.join(" vs ");
-  var doc = [
-    '<!DOCTYPE html><html><head><meta charset="utf-8"><style>',
-    "body{font-family:Calibri,sans-serif;font-size:11pt;margin:2.5cm 2cm}",
-    "h1{color:#2563eb;font-size:20pt}",
-    "h2{color:#2563eb;font-size:13pt;border-bottom:2px solid #f59e0b;padding-bottom:3pt;margin-top:12pt}",
-    "h3{color:#0f172a;font-size:11pt;margin-top:8pt}",
-    "p,li{margin:3pt 0;line-height:1.5;font-size:11pt} ul{padding-left:16pt}",
-    "table{border-collapse:collapse;width:100%;font-size:10pt;margin:6pt 0}",
-    "th{background:#2563eb;color:#fff;padding:4pt 7pt;text-align:left}",
-    "td{padding:3pt 7pt;border-bottom:1px solid #e2e8f0} tr:nth-child(even) td{background:#f8faff}",
-    "</style></head><body>",
-    "<p style=\"color:#2563eb;font-weight:700;font-size:10pt\">Competitor Intelligence Report &middot; Public Data Only</p>",
-    "<h1>" + title + "</h1>",
-    "<hr style=\"border:none;border-top:3px solid #f59e0b;margin:8pt 0\">",
-    renderMD(currentMD),
-    "</body></html>",
-  ].join("");
-  var blob = new Blob(["\ufeff" + doc], { type: "application/msword" });
+  var btn = document.getElementById("btn-word");
+  btn.disabled = true; btn.textContent = "⏳ Writing 6-pager…";
+
+  var resp, data;
+  try {
+    resp = await fetch("/api/six-pager", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        markdown: currentMD,
+        title: "Competitor Intelligence: " + currentComps.join(" vs "),
+        competitors: currentComps,
+      }),
+    });
+    data = await resp.json();
+  } catch (e) {
+    alert("6-pager error: " + e.message);
+    btn.disabled = false; btn.textContent = "📄 Download Word"; return;
+  }
+
+  if (!resp.ok || data.error) {
+    alert("Error: " + (data.error || resp.status));
+    btn.disabled = false; btn.textContent = "📄 Download Word"; return;
+  }
+
+  var html = data.html || "";
+  var blob = new Blob(["\ufeff" + html], { type: "application/msword" });
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "intel_" + currentComps.join("_vs_") + ".doc";
+  a.download = "6pager_" + currentComps.join("_vs_") + ".doc";
   a.click(); URL.revokeObjectURL(a.href);
+  btn.disabled = false; btn.textContent = "📄 Download Word";
 }
 
-/* ── Export PPT (real .pptx via Claude + pptxgenjs) ───────── */
+/* ── Domain map + logo helpers ──────────────────────────────── */
+var DOMAIN_MAP = {
+  walmart:"walmart.com", amazon:"amazon.com", ebay:"ebay.com",
+  target:"target.com",  costco:"costco.com", kroger:"kroger.com",
+  "dollar general":"dollargeneral.com", temu:"temu.com",
+  shein:"shein.com", alibaba:"alibaba.com",
+};
+function domainFor(name) {
+  return DOMAIN_MAP[name.toLowerCase()] || (name.toLowerCase().replace(/\s+/g,"") + ".com");
+}
+async function fetchLogoB64(domain) {
+  try {
+    var r = await fetch("/api/logo?domain=" + encodeURIComponent(domain));
+    if (!r.ok) return null;
+    var buf = await r.arrayBuffer();
+    var ct  = r.headers.get("content-type") || "image/png";
+    var arr = new Uint8Array(buf), b = "";
+    for (var i = 0; i < arr.byteLength; i++) b += String.fromCharCode(arr[i]);
+    return "data:" + ct + ";base64," + btoa(b);
+  } catch { return null; }
+}
+
+/* ── pptxgenjs shorthand helpers ────────────────────────────── */
+function rect(slide, pptx, x, y, w, h, color) {
+  slide.addShape(pptx.ShapeType.rect, { x:x,y:y,w:w,h:h, fill:{color:color}, line:{type:"none"} });
+}
+function titleBar(slide, pptx, C, W, title) {
+  rect(slide, pptx, 0,0,W,1.15,C.blue);
+  rect(slide, pptx, 0,1.15,W,0.07,C.amber);
+  slide.addText(title, { x:0.45,y:0.18,w:W-0.9,h:0.82, fontSize:22,bold:true,color:C.white,fontFace:"Calibri" });
+}
+function addFooter(slide, pptx, C, W, H) {
+  rect(slide, pptx, 0,H-0.32,W,0.32,C.dark);
+  slide.addText("Competitor Intelligence  ·  AI-generated  ·  Public data only", {
+    x:0,y:H-0.3,w:W,h:0.28, fontSize:8,color:"64748B",align:"center",fontFace:"Calibri"
+  });
+}
+
+/* ── Export PPT (executive deck: Claude JSON → pptxgenjs) ───── */
 async function exportSlides() {
   if (!currentMD) return;
   var btn = document.getElementById("btn-slides");
-  btn.disabled = true;
-  btn.textContent = "⏳ Structuring slides…";
+  btn.disabled = true; btn.textContent = "⏳ Structuring slides…";
 
-  // Step 1 — ask Claude to structure the markdown into slide JSON
-  var structResp;
+  var resp;
   try {
-    structResp = await fetch("/api/structure-slides", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        markdown: currentMD,
-        title:    "Competitor Intelligence: " + currentComps.join(" vs "),
-      }),
+    resp = await fetch("/api/structure-slides", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ markdown:currentMD, competitors:currentComps,
+        title:"Competitor Intelligence: " + currentComps.join(" vs ") }),
     });
-  } catch(e) {
-    alert("Network error reaching slide service: " + e.message);
-    btn.disabled = false; btn.textContent = "📊 Download PPT"; return;
-  }
-
-  if (!structResp.ok) {
-    var errTxt = ""; try { errTxt = await structResp.text(); } catch(_) {}
-    alert("Slide structuring failed (" + structResp.status + "): " + errTxt.slice(0,200));
-    btn.disabled = false; btn.textContent = "📊 Download PPT"; return;
-  }
+  } catch(e) { alert("Network error: " + e.message); resetPptBtn(btn); return; }
+  if (!resp.ok) { alert("Slide error " + resp.status); resetPptBtn(btn); return; }
 
   var deck;
-  try { deck = await structResp.json(); } catch(e) {
-    alert("Invalid slide data returned: " + e.message);
-    btn.disabled = false; btn.textContent = "📊 Download PPT"; return;
-  }
+  try { deck = await resp.json(); } catch(e) { alert("Bad JSON: "+e.message); resetPptBtn(btn); return; }
+
+  btn.textContent = "⏳ Fetching logos…";
+  var allNames = new Set(currentComps);
+  (deck.slides||[]).forEach(function(sl) {
+    if (sl.type==="competitor" && sl.name) allNames.add(sl.name);
+    if (sl.type==="cover" && Array.isArray(sl.competitors)) sl.competitors.forEach(function(n){ allNames.add(n); });
+  });
+  var logos = {};
+  await Promise.all(Array.from(allNames).map(async function(name) {
+    logos[name] = await fetchLogoB64(domainFor(name));
+  }));
 
   btn.textContent = "⏳ Building .pptx…";
-
-  // Step 2 — build the real .pptx with pptxgenjs
   try {
     var pptx = new PptxGenJS();
-    pptx.layout  = "LAYOUT_WIDE";       // 16:9  13.33″ x 7.5″
-    pptx.title   = "Competitor Intelligence";
-    pptx.subject = currentComps.join(" vs ");
-    pptx.author  = "AI Competitor Intelligence Tool";
+    pptx.layout = "LAYOUT_WIDE";
+    pptx.title  = "Competitor Intelligence";
+    pptx.author = "AI Competitor Intelligence Tool";
 
-    // ── Brand palette ───────────────────────────────────────
-    var C = {
-      dark:    "0F172A",
-      blue:    "2563EB",
-      blueMid: "1D4ED8",
-      amber:   "F59E0B",
-      white:   "FFFFFF",
-      light:   "F8FAFC",
-      slate:   "475569",
-      border:  "E2E8F0",
-    };
+    var C = { dark:"0F172A", blue:"2563EB", blueDark:"1D4ED8", blueLight:"EFF6FF",
+              amber:"F59E0B", amberLight:"FEF3C7", white:"FFFFFF",
+              light:"F8FAFC", slate:"475569", border:"E2E8F0",
+              green:"16A34A", red:"DC2626", greenLight:"F0FDF4", redLight:"FEF2F2" };
+    var W = 13.33, H = 7.5;
 
-    var W = 13.33, H = 7.5;   // slide dimensions in inches
-
-    (deck.slides || []).forEach(function(slide) {
+    (deck.slides||[]).forEach(function(sl) {
       var s = pptx.addSlide();
 
-      // ── COVER ──────────────────────────────────────────────
-      if (slide.type === "cover") {
-        s.background = { color: C.dark };
-
-        // Amber accent bar (top)
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:0, w:W, h:0.08, fill:{ color:C.amber }, line:{ type:"none" }
+      /* COVER ─────────────────────────────────────────── */
+      if (sl.type === "cover") {
+        s.background = { color:C.dark };
+        rect(s,pptx, 0,0,W,0.09,C.amber);
+        s.addText("AI-POWERED · PUBLIC KNOWLEDGE ONLY", {
+          x:0.8,y:1.1,w:7,h:0.35, fontSize:10,bold:true,color:C.amber,fontFace:"Calibri" });
+        s.addText("COMPETITOR INTELLIGENCE", {
+          x:0.8,y:1.6,w:8,h:0.7, fontSize:28,bold:true,color:C.amber,fontFace:"Calibri",charSpacing:2 });
+        s.addText(sl.title||"Competitive Analysis", {
+          x:0.8,y:2.35,w:8,h:1.4, fontSize:36,bold:true,color:C.white,fontFace:"Calibri",lineSpacingMultiple:1.15 });
+        rect(s,pptx, 0.8,4.0,6.5,0.05,C.amber);
+        s.addText(sl.date||"", {
+          x:0.8,y:4.15,w:6.5,h:0.4, fontSize:13,color:"94A3B8",fontFace:"Calibri" });
+        // Logos column right side
+        var lnames = sl.competitors||currentComps;
+        lnames.forEach(function(name,i) {
+          var lx=9.5, ly=1.8+i*1.5;
+          var b64=logos[name];
+          if (b64) {
+            s.addImage({ data:b64, x:lx,y:ly,w:1.1,h:0.9, sizing:{type:"contain",w:1.1,h:0.9} });
+          } else {
+            rect(s,pptx, lx,ly,1.1,0.9,C.blueDark);
+            s.addText((name||"?").charAt(0), { x:lx,y:ly,w:1.1,h:0.9, fontSize:30,bold:true,color:C.white,align:"center",fontFace:"Calibri" });
+          }
+          s.addText(name, { x:lx-0.05,y:ly+0.95,w:1.25,h:0.3, fontSize:8,color:"94A3B8",align:"center",fontFace:"Calibri" });
         });
+        rect(s,pptx, 0,H-0.38,W,0.38,"1E3A8A");
+        s.addText("Powered by Claude AI  ·  Uses only publicly available information", {
+          x:0,y:H-0.36,w:W,h:0.32, fontSize:9,color:C.white,align:"center",fontFace:"Calibri" });
 
-        // Badge
-        s.addText("AI‑POWERED · PUBLIC KNOWLEDGE ONLY", {
-          x:1.2, y:1.6, w:W-2.4, h:0.35,
-          fontSize:10, bold:true, color:C.amber,
-          align:"center", fontFace:"Calibri"
-        });
-
-        // Title
-        s.addText(slide.title || "Competitor Intelligence", {
-          x:1.2, y:2.1, w:W-2.4, h:1.8,
-          fontSize:36, bold:true, color:C.white,
-          align:"center", fontFace:"Calibri",
-          charSpacing:0.5
-        });
-
-        // Divider line
-        s.addShape(pptx.ShapeType.rect, {
-          x:2.5, y:4.05, w:W-5, h:0.04, fill:{ color:C.amber }, line:{ type:"none" }
-        });
-
-        // Subtitle / date
-        s.addText(slide.subtitle || "", {
-          x:1.2, y:4.2, w:W-2.4, h:0.5,
-          fontSize:14, color:"94A3B8",
-          align:"center", fontFace:"Calibri"
-        });
-
-        // Bottom bar
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:H-0.4, w:W, h:0.4, fill:{ color:"1E3A8A" }, line:{ type:"none" }
-        });
-        s.addText("Powered by Claude AI · Uses only publicly available information", {
-          x:0, y:H-0.38, w:W, h:0.35,
-          fontSize:9, color:C.white, align:"center", fontFace:"Calibri"
-        });
-
-      // ── SECTION DIVIDER ───────────────────────────────────
-      } else if (slide.type === "section") {
-        s.background = { color:C.blue };
-
-        // Side accent
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:0, w:0.12, h:H, fill:{ color:C.amber }, line:{ type:"none" }
-        });
-
-        s.addText(slide.title || "", {
-          x:0.5, y:2.6, w:W-1, h:1.6,
-          fontSize:32, bold:true, color:C.white,
-          align:"center", fontFace:"Calibri"
-        });
-
-        // Bottom bar
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:H-0.35, w:W, h:0.35, fill:{ color:"1D4ED8" }, line:{ type:"none" }
-        });
-        s.addText("Competitor Intelligence", {
-          x:0, y:H-0.33, w:W, h:0.3,
-          fontSize:9, color:"BFD9FF", align:"center", fontFace:"Calibri"
-        });
-
-      // ── BULLETS ────────────────────────────────────────────
-      } else if (slide.type === "bullets") {
+      /* KPI ──────────────────────────────────────────── */
+      } else if (sl.type === "kpi") {
         s.background = { color:C.white };
-
-        // Blue title bar
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:0, w:W, h:1.1, fill:{ color:C.blue }, line:{ type:"none" }
+        titleBar(s,pptx,C,W,sl.title||"At a Glance");
+        var metrics=(sl.metrics||[]).slice(0,4);
+        var mw=(W-1.0)/Math.max(metrics.length,1);
+        metrics.forEach(function(m,i) {
+          var mx=0.5+i*mw;
+          var sc=m.sentiment==="positive"?C.green:m.sentiment==="negative"?C.red:C.slate;
+          s.addShape(pptx.ShapeType.roundRect, { x:mx+0.1,y:1.6,w:mw-0.2,h:3.6, fill:{color:C.light}, line:{color:sc,pt:2}, rectRadius:0.08 });
+          rect(s,pptx, mx+0.1,1.6,mw-0.2,0.12,sc);
+          s.addText(m.value||"", { x:mx+0.1,y:2.1,w:mw-0.2,h:1.2, fontSize:34,bold:true,color:C.blue,align:"center",fontFace:"Calibri" });
+          s.addText(m.unit||"", { x:mx+0.1,y:3.25,w:mw-0.2,h:0.4, fontSize:11,color:C.slate,align:"center",fontFace:"Calibri" });
+          s.addText(m.label||"", { x:mx+0.1,y:3.65,w:mw-0.2,h:0.5, fontSize:10,bold:true,color:"334155",align:"center",fontFace:"Calibri",wrap:true });
+          if (m.delta) {
+            rect(s,pptx, mx+mw*0.2,4.5,mw*0.6,0.38,sc);
+            s.addText(m.delta, { x:mx+mw*0.2,y:4.5,w:mw*0.6,h:0.38, fontSize:11,bold:true,color:C.white,align:"center",fontFace:"Calibri" });
+          }
         });
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:1.1, w:W, h:0.06, fill:{ color:C.amber }, line:{ type:"none" }
-        });
-        s.addText(slide.title || "", {
-          x:0.4, y:0.15, w:W-0.8, h:0.8,
-          fontSize:20, bold:true, color:C.white, fontFace:"Calibri"
-        });
+        addFooter(s,pptx,C,W,H);
 
-        // Bullets
-        var bullets = (slide.bullets || []).slice(0, 7);
-        bullets.forEach(function(txt, i) {
-          s.addShape(pptx.ShapeType.rect, {
-            x:0.45, y:1.45 + i*0.76, w:0.06, h:0.06,
-            fill:{ color:C.amber }, line:{ type:"none" }
-          });
-          s.addText(txt, {
-            x:0.65, y:1.35 + i*0.76, w:W-1.1, h:0.7,
-            fontSize:13, color:"1E293B", fontFace:"Calibri",
-            valign:"middle"
-          });
-        });
-
-        addFooter(s, pptx, C, W, H);
-
-      // ── TABLE ──────────────────────────────────────────────
-      } else if (slide.type === "table") {
+      /* EXEC SUMMARY ─────────────────────────────────── */
+      } else if (sl.type === "exec-summary") {
         s.background = { color:C.white };
-
-        // Blue title bar
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:0, w:W, h:1.1, fill:{ color:C.blue }, line:{ type:"none" }
+        titleBar(s,pptx,C,W,"Executive Summary");
+        s.addShape(pptx.ShapeType.roundRect, { x:0.5,y:1.38,w:W-1,h:1.05, fill:{color:C.blueLight}, line:{color:C.blue,pt:1.5}, rectRadius:0.06 });
+        s.addText("\u201c"+(sl.headline||"")+"\u201d", { x:0.7,y:1.40,w:W-1.4,h:1.0, fontSize:14,bold:true,color:C.blue,fontFace:"Calibri",valign:"middle",wrap:true });
+        (sl.points||[]).slice(0,5).forEach(function(pt,i) {
+          s.addShape(pptx.ShapeType.ellipse, { x:0.5,y:2.65+i*0.82,w:0.36,h:0.36, fill:{color:C.amber},line:{type:"none"} });
+          s.addText(String(i+1), { x:0.5,y:2.65+i*0.82,w:0.36,h:0.36, fontSize:11,bold:true,color:C.dark,align:"center",fontFace:"Calibri" });
+          s.addText(pt, { x:1.0,y:2.62+i*0.82,w:W-1.5,h:0.72, fontSize:13,color:"1E293B",fontFace:"Calibri",valign:"middle",wrap:true });
+          if (i<4) rect(s,pptx, 0.5,3.02+i*0.82,W-1,0.01,C.border);
         });
-        s.addShape(pptx.ShapeType.rect, {
-          x:0, y:1.1, w:W, h:0.06, fill:{ color:C.amber }, line:{ type:"none" }
+        addFooter(s,pptx,C,W,H);
+
+      /* COMPETITOR ───────────────────────────────────── */
+      } else if (sl.type === "competitor") {
+        s.background = { color:C.white };
+        var lw=3.6;
+        rect(s,pptx, 0,0,lw,H,C.dark);
+        rect(s,pptx, lw,0,0.06,H,C.amber);
+        var cLogo=logos[sl.name]||null;
+        if (cLogo) {
+          s.addImage({ data:cLogo, x:0.5,y:0.8,w:2.3,h:1.5, sizing:{type:"contain",w:2.3,h:1.5} });
+        } else {
+          s.addShape(pptx.ShapeType.roundRect, { x:0.6,y:0.85,w:2.2,h:1.4, fill:{color:C.blueDark},line:{type:"none"},rectRadius:0.1 });
+          s.addText((sl.name||"?").charAt(0), { x:0.6,y:0.85,w:2.2,h:1.4, fontSize:52,bold:true,color:C.white,align:"center",fontFace:"Calibri" });
+        }
+        s.addText(sl.tagline||"", { x:0.2,y:2.55,w:3.2,h:0.6, fontSize:11,color:"94A3B8",fontFace:"Calibri",align:"center",wrap:true });
+        if (sl.stat) {
+          rect(s,pptx, 0.3,3.35,3.0,1.6,"1E293B");
+          s.addText(sl.stat.value||"", { x:0.3,y:3.45,w:3.0,h:0.85, fontSize:32,bold:true,color:C.amber,align:"center",fontFace:"Calibri" });
+          s.addText(sl.stat.label||"", { x:0.3,y:4.28,w:3.0,h:0.6, fontSize:10,color:"94A3B8",align:"center",fontFace:"Calibri",wrap:true });
+        }
+        s.addText(sl.name||"", { x:lw+0.35,y:0.22,w:W-lw-0.6,h:0.78, fontSize:26,bold:true,color:C.blue,fontFace:"Calibri" });
+        rect(s,pptx, lw+0.35,1.0,W-lw-0.7,0.05,C.amber);
+        (sl.bullets||[]).slice(0,4).forEach(function(b,i) {
+          s.addShape(pptx.ShapeType.ellipse, { x:lw+0.35,y:1.28+i*1.38,w:0.14,h:0.14, fill:{color:C.amber},line:{type:"none"} });
+          s.addText(b, { x:lw+0.62,y:1.2+i*1.38,w:W-lw-0.92,h:1.28, fontSize:13,color:"1E293B",fontFace:"Calibri",valign:"top",wrap:true });
+          if (i<3) rect(s,pptx, lw+0.35,2.5+i*1.38,W-lw-0.7,0.01,C.border);
         });
-        s.addText(slide.title || "Comparison Table", {
-          x:0.4, y:0.15, w:W-0.8, h:0.8,
-          fontSize:20, bold:true, color:C.white, fontFace:"Calibri"
-        });
+        addFooter(s,pptx,C,W,H);
 
-        var headers = (slide.headers || []);
-        var rows    = (slide.rows    || []);
-
-        if (headers.length && rows.length) {
-          var colW    = (W - 0.6) / headers.length;
-          var rowH    = Math.min(0.55, (H - 1.9) / (rows.length + 1));
-          var startY  = 1.3;
-          var startX  = 0.3;
-
-          // Header row
-          headers.forEach(function(h, ci) {
-            s.addShape(pptx.ShapeType.rect, {
-              x:startX + ci*colW, y:startY, w:colW, h:rowH,
-              fill:{ color:C.blue }, line:{ color:C.border, pt:0.5 }
-            });
-            s.addText(h, {
-              x:startX + ci*colW + 0.05, y:startY + 0.04, w:colW - 0.1, h:rowH - 0.08,
-              fontSize:10, bold:true, color:C.white, fontFace:"Calibri", valign:"middle"
-            });
+      /* COMPARISON TABLE ─────────────────────────────── */
+      } else if (sl.type === "comparison") {
+        s.background = { color:C.white };
+        titleBar(s,pptx,C,W,sl.title||"Head-to-Head Comparison");
+        var hdrs=sl.headers||[], rows=sl.rows||[];
+        if (hdrs.length && rows.length) {
+          var cw=(W-0.6)/hdrs.length, sy=1.35, rh=Math.min(0.58,(H-1.8)/(rows.length+1));
+          hdrs.forEach(function(h,ci) {
+            rect(s,pptx, 0.3+ci*cw,sy,cw,rh,ci===0?C.dark:C.blue);
+            s.addText(h, { x:0.35+ci*cw,y:sy+0.04,w:cw-0.1,h:rh-0.08, fontSize:10,bold:true,color:C.white,fontFace:"Calibri",valign:"middle" });
           });
-
-          // Data rows
-          rows.forEach(function(row, ri) {
-            var bg = ri % 2 === 0 ? C.white : C.light;
-            row.forEach(function(cell, ci) {
-              s.addShape(pptx.ShapeType.rect, {
-                x:startX + ci*colW, y:startY + (ri+1)*rowH, w:colW, h:rowH,
-                fill:{ color:bg }, line:{ color:C.border, pt:0.5 }
-              });
-              s.addText(cell, {
-                x:startX + ci*colW + 0.05, y:startY + (ri+1)*rowH + 0.03, w:colW - 0.1, h:rowH - 0.06,
-                fontSize:9, color:"334155", fontFace:"Calibri", valign:"middle", wrap:true
-              });
+          rows.forEach(function(row,ri) {
+            row.forEach(function(cell,ci) {
+              rect(s,pptx, 0.3+ci*cw,sy+(ri+1)*rh,cw,rh,ci===0?C.light:ri%2===0?C.white:"F0F5FF");
+              rect(s,pptx, 0.3+ci*cw,sy+(ri+2)*rh-0.01,cw,0.01,C.border);
+              s.addText(cell, { x:0.35+ci*cw,y:sy+(ri+1)*rh+0.03,w:cw-0.1,h:rh-0.06, fontSize:9,color:"334155",fontFace:"Calibri",valign:"middle",wrap:true });
             });
           });
         }
+        addFooter(s,pptx,C,W,H);
 
-        addFooter(s, pptx, C, W, H);
+      /* IMPLICATIONS ─────────────────────────────────── */
+      } else if (sl.type === "implications") {
+        s.background = { color:C.white };
+        titleBar(s,pptx,C,W,"Key Implications");
+        var panW=(W-0.9)/2, py=1.35;
+        // Risks panel
+        rect(s,pptx, 0.3,py,panW,0.45,C.red);
+        s.addText("⚠  RISKS", { x:0.3,y:py,w:panW,h:0.45, fontSize:12,bold:true,color:C.white,fontFace:"Calibri",valign:"middle",indent:0.15 });
+        (sl.risks||[]).slice(0,4).forEach(function(r,i) {
+          rect(s,pptx, 0.3,py+0.45+i*1.28,panW,1.25,i%2===0?"FFF5F5":C.redLight);
+          s.addShape(pptx.ShapeType.ellipse, { x:0.42,y:py+0.57+i*1.28,w:0.28,h:0.28, fill:{color:C.red},line:{type:"none"} });
+          s.addText(String(i+1), { x:0.42,y:py+0.57+i*1.28,w:0.28,h:0.28, fontSize:9,bold:true,color:C.white,align:"center",fontFace:"Calibri" });
+          s.addText(r, { x:0.82,y:py+0.5+i*1.28,w:panW-0.6,h:1.2, fontSize:11,color:"7F1D1D",fontFace:"Calibri",wrap:true,valign:"middle" });
+        });
+        // Opportunities panel
+        var ox=0.3+panW+0.3;
+        rect(s,pptx, ox,py,panW,0.45,C.green);
+        s.addText("✓  OPPORTUNITIES", { x:ox,y:py,w:panW,h:0.45, fontSize:12,bold:true,color:C.white,fontFace:"Calibri",valign:"middle",indent:0.15 });
+        (sl.opportunities||[]).slice(0,4).forEach(function(o,i) {
+          rect(s,pptx, ox,py+0.45+i*1.28,panW,1.25,i%2===0?"F0FDF4":C.greenLight);
+          s.addShape(pptx.ShapeType.ellipse, { x:ox+0.12,y:py+0.57+i*1.28,w:0.28,h:0.28, fill:{color:C.green},line:{type:"none"} });
+          s.addText(String(i+1), { x:ox+0.12,y:py+0.57+i*1.28,w:0.28,h:0.28, fontSize:9,bold:true,color:C.white,align:"center",fontFace:"Calibri" });
+          s.addText(o, { x:ox+0.52,y:py+0.5+i*1.28,w:panW-0.6,h:1.2, fontSize:11,color:"14532D",fontFace:"Calibri",wrap:true,valign:"middle" });
+        });
+        addFooter(s,pptx,C,W,H);
+
+      /* ACTIONS ──────────────────────────────────────── */
+      } else if (sl.type === "actions") {
+        s.background = { color:C.white };
+        titleBar(s,pptx,C,W,sl.title||"Recommended Actions");
+        var acts=(sl.actions||[]).slice(0,5);
+        var ach=Math.min(1.15,(H-1.75)/Math.max(acts.length,1));
+        acts.forEach(function(a,i) {
+          var ay=1.4+i*ach;
+          rect(s,pptx, 0.3,ay,W-0.6,ach-0.08,i%2===0?C.light:C.white);
+          s.addShape(pptx.ShapeType.ellipse, { x:0.4,y:ay+ach*0.22,w:0.5,h:0.5, fill:{color:C.amber},line:{type:"none"} });
+          s.addText(String(a.number||i+1), { x:0.4,y:ay+ach*0.22,w:0.5,h:0.5, fontSize:14,bold:true,color:C.dark,align:"center",fontFace:"Calibri" });
+          s.addText(a.title||"", { x:1.05,y:ay+0.05,w:W-4.3,h:0.42, fontSize:13,bold:true,color:C.blue,fontFace:"Calibri" });
+          s.addText(a.detail||"", { x:1.05,y:ay+0.47,w:W-4.3,h:ach-0.6, fontSize:10,color:C.slate,fontFace:"Calibri",wrap:true });
+          rect(s,pptx, W-3.1,ay+0.1,1.35,0.34,"EFF6FF");
+          s.addText("👤 "+(a.owner||""), { x:W-3.1,y:ay+0.1,w:1.35,h:0.34, fontSize:8,color:C.blue,fontFace:"Calibri",valign:"middle",align:"center" });
+          rect(s,pptx, W-1.6,ay+0.1,1.25,0.34,C.amberLight);
+          s.addText("📅 "+(a.timeline||""), { x:W-1.6,y:ay+0.1,w:1.25,h:0.34, fontSize:8,color:"92400E",fontFace:"Calibri",valign:"middle",align:"center" });
+        });
+        addFooter(s,pptx,C,W,H);
       }
     });
 
-    var fileName = "intel_" + currentComps.join("_vs_") + ".pptx";
-    await pptx.writeFile({ fileName: fileName });
-
-  } catch(e) {
-    alert("PPT generation failed: " + e.message);
-  }
-
-  btn.disabled = false;
-  btn.textContent = "📊 Download PPT";
+    await pptx.writeFile({ fileName:"intel_"+currentComps.join("_vs_")+".pptx" });
+  } catch(e) { alert("PPT build failed: " + e.message); }
+  resetPptBtn(btn);
 }
 
-function addFooter(slide, pptx, C, W, H) {
-  slide.addShape(pptx.ShapeType.rect, {
-    x:0, y:H-0.3, w:W, h:0.3, fill:{ color:C.dark }, line:{ type:"none" }
-  });
-  slide.addText("Competitor Intelligence · AI-generated · Public data only", {
-    x:0, y:H-0.28, w:W, h:0.26,
-    fontSize:8, color:"64748B", align:"center", fontFace:"Calibri"
-  });
+function resetPptBtn(btn) {
+  btn.disabled = false; btn.textContent = "📊 Download PPT";
 }
 </script>
 </body>

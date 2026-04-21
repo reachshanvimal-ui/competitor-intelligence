@@ -5,3 +5,11 @@
 [[edge_functions]]
   function = "structure-slides"
   path     = "/api/structure-slides"
+
+[[edge_functions]]
+  function = "six-pager"
+  path     = "/api/six-pager"
+
+[[edge_functions]]
+  function = "logo-proxy"
+  path     = "/api/logo"
