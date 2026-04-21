@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Competitor Intelligence — AI-Powered Analysis</title>
+<meta name="description" content="AI-powered competitor intelligence tool. Select competitors, choose focus areas, get a structured 6-section report instantly.">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#2563eb;--blue-dark:#1d4ed8;--blue-light:#eff6ff;
+  --accent:#f59e0b;--dark:#0f172a;--text:#1e293b;
+  --g10:#f8fafc;--g50:#e2e8f0;--g100:#94a3b8;
+  --green:#16a34a;--red:#dc2626;
+}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     background:var(--g10);color:var(--text);display:flex;flex-direction:column;min-height:100vh}
+
+/* ── Header ─────────────────────────────────────────── */
+.hdr{background:var(--dark);height:54px;padding:0 1.4rem;flex-shrink:0;
+     display:flex;align-items:center;justify-content:space-between;
+     box-shadow:0 2px 12px rgba(0,0,0,.4)}
+.hdr-l{display:flex;align-items:center;gap:10px}
+.hdr-icon{font-size:20px}
+.hdr-title{color:#fff;font-size:15px;font-weight:700;letter-spacing:-.2px}
+.hdr-badge{background:var(--accent);color:var(--dark);font-size:9px;
+           font-weight:800;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px}
+.hdr-r{display:flex;align-items:center;gap:.5rem}
+.gh-link{display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.6);
+         font-size:11px;text-decoration:none;border:1px solid rgba(255,255,255,.15);
+         border-radius:20px;padding:3px 10px;transition:all .15s}
+.gh-link:hover{color:#fff;border-color:rgba(255,255,255,.4)}
+
+/* ── Layout ──────────────────────────────────────────── */
+.layout{display:grid;grid-template-columns:300px 1fr;flex:1;overflow:hidden;height:calc(100vh - 54px - 28px)}
+.sidebar{background:#fff;border-right:1px solid var(--g50);
+         padding:.85rem;overflow-y:auto;display:flex;flex-direction:column;gap:.8rem}
+.main{padding:1rem;overflow-y:auto;display:flex;flex-direction:column;gap:.85rem}
+
+/* ── Sidebar labels ──────────────────────────────────── */
+.slabel{font-size:10px;font-weight:700;color:var(--g100);
+        text-transform:uppercase;letter-spacing:.7px;margin-bottom:.3rem}
+.ctrl-row{display:flex;gap:.3rem;margin-top:.35rem}
+.ctrl-btn{flex:1;font-size:10px;padding:.3rem;border:1px solid var(--g50);
+          border-radius:5px;cursor:pointer;background:#fff;color:var(--text)}
+.ctrl-btn:hover{background:var(--g10)}
+
+/* ── Competitor cards ────────────────────────────────── */
+.cgrid{display:grid;grid-template-columns:1fr 1fr;gap:.3rem}
+.ccard{border:2px solid var(--g50);border-radius:8px;padding:.45rem .5rem;
+       cursor:pointer;position:relative;display:flex;flex-direction:column;gap:2px;
+       user-select:none;transition:border-color .12s,background .12s}
+.ccard input[type=checkbox]{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.ccard:has(input:checked){border-color:var(--blue);background:var(--blue-light)}
+.ccard:hover{border-color:#93c5fd;background:#f0f5ff}
+.ctick{display:none;position:absolute;top:4px;right:5px;color:var(--blue);
+       font-size:11px;font-weight:900}
+.ccard:has(input:checked) .ctick{display:block}
+.cemoji{font-size:14px}.cname{font-size:11px;font-weight:700}
+.csect{font-size:9px;color:var(--g100);line-height:1.2}
+.cpri{font-size:8px;font-weight:700;color:var(--blue);background:#dbeafe;
+      border-radius:3px;padding:1px 4px;text-transform:uppercase;width:fit-content;margin-top:1px}
+
+/* ── Mode buttons ────────────────────────────────────── */
+.mode-row{display:flex;gap:.3rem}
+.mbtn{flex:1;padding:.38rem;border:2px solid var(--g50);border-radius:6px;
+      font-size:11px;font-weight:600;cursor:pointer;background:#fff;
+      color:var(--g100);text-align:center;transition:all .12s}
+.mbtn.active{border-color:var(--blue);color:var(--blue);background:var(--blue-light)}
+.mbtn:hover:not(.active){border-color:#93c5fd;background:#f8faff}
+
+/* ── Dims ────────────────────────────────────────────── */
+.dim-lbl{display:flex;align-items:flex-start;gap:.4rem;cursor:pointer;
+         p.25rem .3rem;border-radius:5px;transition:background .1s}
+.dim-lbl:hover{background:var(--g10)}
+.dim-chk{accent-color:var(--blue);margin-top:3px;width:13px;height:13px;flex-shrink:0}
+.dim-name{font-size:11px;font-weight:600;display:block}
+.dim-desc{font-size:9px;color:var(--g100);display:block;line-height:1.25}
+
+/* ── Analyze button ──────────────────────────────────── */
+.abtn{width:100%;padding:.65rem;background:var(--blue);color:#fff;border:none;
+      border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;gap:.5rem;
+      box-shadow:0 2px 8px rgba(37,99,235,.35);transition:all .12s}
+.abtn:hover{background:var(--blue-dark);transform:translateY(-1px)}
+.abtn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+.spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.3);
+      border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
+.abtn.busy .spin{display:block}.abtn.busy .bico{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Banner ──────────────────────────────────────────── */
+.banner{background:linear-gradient(135deg,var(--dark) 0%,#1e3a8a 55%,var(--blue) 100%);
+        border-radius:12px;padding:1rem 1.3rem;display:flex;align-items:center;
+        justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.btag{background:var(--accent);color:var(--dark);font-size:9px;font-weight:800;
+      padding:2px 8px;border-radius:20px;text-transform:uppercase;
+      letter-spacing:.4px;display:inline-block;margin-bottom:.3rem}
+.btitle{color:#fff;font-size:15px;font-weight:700}
+.bsub{color:rgba(255,255,255,.55);font-size:11px;margin-top:.25rem}
+.steps{display:flex;gap:.3rem;flex-wrap:wrap}
+.step{display:flex;align-items:center;gap:.25rem;background:rgba(255,255,255,.1);
+      border:1px solid rgba(255,255,255,.15);border-radius:20px;
+      padding:.22rem .55rem;font-size:10px;color:rgba(255,255,255,.85)}
+.stepn{background:var(--accent);color:var(--dark);border-radius:50%;
+       width:14px;height:14px;display:flex;align-items:center;justify-content:center;
+       font-size:9px;font-weight:900;flex-shrink:0}
+
+/* ── Export bar ──────────────────────────────────────── */
+.ebar{display:flex;gap:.5rem;flex-wrap:wrap}
+.ebtn{display:flex;align-items:center;gap:.3rem;padding:.35rem .85rem;
+      border:1.5px solid var(--g50);border-radius:7px;font-size:11px;
+      font-weight:600;cursor:pointer;background:#fff;color:var(--text);transition:all .12s}
+.ebtn:hover:not(:disabled){border-color:var(--blue);color:var(--blue);background:var(--blue-light)}
+.ebtn:disabled{opacity:.35;cursor:not-allowed}
+
+/* ── Status bar ──────────────────────────────────────── */
+.status{display:none;align-items:center;gap:.45rem;font-size:12px;
+        color:#1d4ed8;background:var(--blue-light);border:1px solid #bfdbfe;
+        border-radius:7px;padding:.4rem .75rem}
+.status.vis{display:flex}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--blue);
+       animation:pulse 1.2s ease infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── Output card ─────────────────────────────────────── */
+.ocard{background:#fff;border-radius:12px;border:1px solid var(--g50);
+       padding:1.5rem;flex:1;box-shadow:0 1px 6px rgba(0,0,0,.06);min-height:320px}
+.ph{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:.7rem;padding:2.5rem 1rem;text-align:center;color:var(--g100)}
+.ph-icon{width:64px;height:64px;background:linear-gradient(135deg,#eff6ff,#dbeafe);
+         border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px}
+.ph-title{font-size:15px;font-weight:700;color:var(--text)}
+.ph-sub{font-size:12px;max-width:300px;line-height:1.65}
+.ph-pills{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:center;margin-top:.2rem}
+.ph-pill{border-radius:7px;padding:.25rem .65rem;font-size:11px;font-weight:600}
+
+/* ── Markdown output ─────────────────────────────────── */
+#out{display:none;line-height:1.8;font-size:13.5px}
+#out h2{font-size:1.05rem;font-weight:800;color:var(--blue);
+        margin:1.3rem 0 .45rem;border-bottom:2px solid var(--accent);padding-bottom:.2rem}
+#out h3{font-size:.96rem;font-weight:700;color:var(--dark);margin:.9rem 0 .25rem}
+#out ul{padding-left:1.2rem;margin:.35rem 0}
+#out li{margin:.2rem 0}
+#out p{margin:.35rem 0}
+#out table{width:100%;border-collapse:collapse;margin:.75rem 0;font-size:12px}
+#out th{background:var(--blue);color:#fff;padding:.4rem .65rem;text-align:left;
+        font-size:11px;white-space:nowrap}
+#out td{padding:.3rem .65rem;border-bottom:1px solid var(--g50)}
+#out tr:nth-child(even) td{background:#f8faff}
+.cursor{display:inline-block;width:2px;height:1em;background:var(--blue);
+        animation:blink .7s step-end infinite;vertical-align:middle;margin-left:1px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* ── Error ───────────────────────────────────────────── */
+.err{color:var(--red);padding:.85rem;background:#fff5f5;
+     border:1px solid #fecaca;border-radius:8px;font-size:13px;line-height:1.65}
+.err code{font-size:11px;background:#fee2e2;padding:1px 5px;border-radius:3px;
+          font-family:monospace;display:block;margin:.3rem 0;word-break:break-all}
+
+/* ── Footer ──────────────────────────────────────────── */
+.footer{text-align:center;font-size:10px;color:var(--g100);
+        padding:.5rem 0;flex-shrink:0;background:var(--g10);border-top:1px solid var(--g50)}
+.footer a{color:var(--g100);text-decoration:none}
+.footer a:hover{color:var(--blue)}
+
+@media(max-width:760px){
+  .layout{grid-template-columns:1fr;height:auto}
+  .sidebar{border-right:none;border-bottom:1px solid var(--g50)}
+}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-l">
+    <span class="hdr-icon">🔍</span>
+    <span class="hdr-title">Competitor Intelligence</span>
+    <span class="hdr-badge">AI&#8209;Powered</span>
+  </div>
+  <div class="hdr-r">
+    <a class="gh-link" href="https://github.com/YOUR_GITHUB_USERNAME/competitor-intelligence" target="_blank" rel="noopener">
+      ⭐ GitHub
+    </a>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ── Sidebar ─────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <div>
+      <div class="slabel">1 — Competitors</div>
+      <p style="font-size:10px;color:var(--g100);margin-bottom:.4rem">
+        Top 3 pre-selected. Click any card to toggle.
+      </p>
+      <div class="cgrid" id="cgrid"></div>
+      <div class="ctrl-row">
+        <button class="ctrl-btn" onclick="selAll()">Select All</button>
+        <button class="ctrl-btn" onclick="clrAll()">Clear All</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="slabel">2 — Analysis Mode</div>
+      <div class="mode-row">
+        <button class="mbtn active" id="m-compare" onclick="setMode('compare')">⚡ Compare</button>
+        <button class="mbtn"        id="m-single"  onclick="setMode('single')">🔎 Deep Dive</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="slabel">3 — Focus Areas</div>
+      <div id="dims"></div>
+      <div class="ctrl-row">
+        <button class="ctrl-btn" onclick="setDims(true)">All</button>
+        <button class="ctrl-btn" onclick="setDims(false)">None</button>
+      </div>
+    </div>
+
+    <button class="abtn" id="abtn" onclick="analyze()">
+      <span class="bico">🔍</span>
+      <div class="spin"></div>
+      <span id="blbl">Analyze</span>
+    </button>
+
+  </aside>
+
+  <!-- ── Main ───────────────────────────────────────── -->
+  <main class="main">
+
+    <div class="banner">
+      <div>
+        <span class="btag">Public · No internal data</span>
+        <div class="btitle">Retail &amp; E-commerce Competitor Intelligence</div>
+        <div class="bsub">Select competitors → pick focus areas → Analyze → export report.</div>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="stepn">1</span>Competitors</div>
+        <div class="step"><span class="stepn">2</span>Mode</div>
+        <div class="step"><span class="stepn">3</span>Focus areas</div>
+        <div class="step"><span class="stepn">4</span>Export</div>
+      </div>
+    </div>
+
+    <div class="ebar">
+      <button class="ebtn" id="btn-slides" onclick="exportSlides()" disabled>📊 Download Slides</button>
+      <button class="ebtn" id="btn-word"   onclick="exportWord()"   disabled>📄 Download Word</button>
+      <button class="ebtn" id="btn-copy"   onclick="copyMD()"       disabled>📋 Copy Markdown</button>
+    </div>
+
+    <div class="status" id="status">
+      <div class="pulse"></div>
+      <span id="stxt">Analyzing…</span>
+    </div>
+
+    <div class="ocard">
+      <div class="ph" id="ph">
+        <div class="ph-icon">🏪</div>
+        <div class="ph-title">Ready to analyze</div>
+        <div class="ph-sub">Pick competitors &amp; focus areas on the left, then click <strong>Analyze</strong>.</div>
+        <div class="ph-pills">
+          <span class="ph-pill" style="background:#eff6ff;color:var(--blue)">📊 6-Section Report</span>
+          <span class="ph-pill" style="background:#f0fdf4;color:var(--green)">⚡ Live Streaming</span>
+          <span class="ph-pill" style="background:#fff8e6;color:#92400e">📥 Slides + Word Export</span>
+        </div>
+      </div>
+      <div id="out"></div>
+    </div>
+
+  </main>
+</div>
+
+<div class="footer">
+  Powered by <a href="https://anthropic.com" target="_blank" rel="noopener">Claude AI</a> &middot;
+  Uses only publicly available world knowledge &middot; No internal or proprietary data &middot;
+  <a href="https://github.com/YOUR_GITHUB_USERNAME/competitor-intelligence" target="_blank" rel="noopener">Open Source</a>
+</div>
+
+<script>
+/* ── Data ────────────────────────────────────────────── */
+var COMPETITORS = [
+  { name:"Amazon",         emoji:"📦", sector:"E-commerce / Marketplace", primary:true  },
+  { name:"eBay",           emoji:"🛒", sector:"E-commerce / Marketplace", primary:true  },
+  { name:"Target",         emoji:"🎯", sector:"Mass Retail",              primary:true  },
+  { name:"Costco",         emoji:"🏭", sector:"Membership Retail",        primary:false },
+  { name:"Kroger",         emoji:"🥕", sector:"Grocery / Omnichannel",    primary:false },
+  { name:"Dollar General", emoji:"💲", sector:"Discount Retail",          primary:false },
+  { name:"Temu",           emoji:"🌏", sector:"Cross-border E-commerce",  primary:false },
+  { name:"Shein",          emoji:"👗", sector:"Fast Fashion",             primary:false },
+  { name:"Alibaba",        emoji:"🐘", sector:"E-commerce / B2B",         primary:false },
+];
+
+var DIMS = [
+  { name:"Pricing Strategy",            desc:"Discounts, dynamic pricing, promotions"       },
+  { name:"Product Assortment",          desc:"Categories, exclusives, private labels"        },
+  { name:"Customer Experience",         desc:"Delivery, returns, UX, membership"            },
+  { name:"Marketplace Strategy",        desc:"Seller ecosystem, commissions, GMV"           },
+  { name:"Technology & Innovation",     desc:"AI, automation, personalization"              },
+  { name:"Trust & Safety",              desc:"Screening, risk models, detection, appeals"   },
+  { name:"Recent News & Moves",         desc:"Latest developments & announcements"          },
+  { name:"Platform Maturity",           desc:"Automation depth & sophistication"            },
+];
+
+/* ── Build sidebar UI ────────────────────────────────── */
+(function buildUI() {
+  var grid = document.getElementById("cgrid");
+  COMPETITORS.forEach(function(c) {
+    var lbl = document.createElement("label");
+    lbl.className = "ccard" + (c.primary ? "" : "");
+    lbl.innerHTML =
+      '<input type="checkbox" name="comp" value="' + c.name + '"' + (c.primary ? " checked" : "") + ' class="comp-chk">' +
+      '<span class="cemoji">' + c.emoji + "</span>" +
+      '<span class="cname">' + c.name + "</span>" +
+      '<span class="csect">' + c.sector + "</span>" +
+      (c.primary ? '<span class="cpri">Top Pick</span>' : "") +
+      '<span class="ctick">✓</span>';
+    grid.appendChild(lbl);
+  });
+
+  var dimsEl = document.getElementById("dims");
+  DIMS.forEach(function(d) {
+    var lbl = document.createElement("label");
+    lbl.className = "dim-lbl";
+    lbl.innerHTML =
+      '<input type="checkbox" name="dim" value="' + d.name + '" checked class="dim-chk">' +
+      "<span>" +
+      '<span class="dim-name">' + d.name + "</span>" +
+      '<span class="dim-desc">' + d.desc + "</span>" +
+      "</span>";
+    dimsEl.appendChild(lbl);
+  });
+})();
+
+/* ── State ───────────────────────────────────────────── */
+var mode = "compare";
+var currentMD = "";
+var currentComps = [];
+
+/* ── Helpers ─────────────────────────────────────────── */
+function getComps() {
+  return Array.from(document.querySelectorAll('input[name="comp"]:checked'))
+              .map(function(el) { return el.value; });
+}
+function getDims() {
+  return Array.from(document.querySelectorAll('input[name="dim"]:checked'))
+              .map(function(el) { return el.value; });
+}
+function selAll()   { document.querySelectorAll('input[name="comp"]').forEach(function(el) { el.checked = true;  }); }
+function clrAll()   { document.querySelectorAll('input[name="comp"]').forEach(function(el) { el.checked = false; }); }
+function setDims(v) { document.querySelectorAll('input[name="dim"]' ).forEach(function(el) { el.checked = v;     }); }
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll(".mbtn").forEach(function(b) { b.classList.remove("active"); });
+  document.getElementById("m-" + m).classList.add("active");
+}
+function setExports(on) {
+  ["btn-slides", "btn-word", "btn-copy"].forEach(function(id) {
+    document.getElementById(id).disabled = !on;
+  });
+}
+
+/* ── Analyze ─────────────────────────────────────────── */
+async function analyze() {
+  var comps = getComps();
+  var dims  = getDims();
+  if (!comps.length) { alert("Select at least one competitor!"); return; }
+  if (!dims.length)  { alert("Select at least one focus area!"); return; }
+
+  currentComps = comps; currentMD = "";
+  var abtn   = document.getElementById("abtn");
+  var status = document.getElementById("status");
+  var ph     = document.getElementById("ph");
+  var out    = document.getElementById("out");
+
+  abtn.disabled = true; abtn.classList.add("busy");
+  document.getElementById("blbl").textContent = "Analyzing\u2026";
+  document.getElementById("stxt").textContent = "Researching " + comps.join(", ") + "\u2026";
+  status.classList.add("vis");
+  ph.style.display = "none"; out.style.display = "block";
+  out.innerHTML = '<span class="cursor"></span>';
+  setExports(false);
+
+  var resp;
+  try {
+    resp = await fetch("/api/analyze", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ competitors: comps, dims: dims, mode: mode }),
+    });
+  } catch(e) {
+    showErr("Network error", e.message, "Check your internet connection."); resetBtn(); return;
+  }
+
+  if (!resp.ok) {
+    var txt = ""; try { txt = await resp.text(); } catch(_) {}
+    showErr("API error " + resp.status, txt.slice(0, 400), ""); resetBtn(); return;
+  }
+
+  var reader  = resp.body.getReader();
+  var decoder = new TextDecoder();
+  var buf     = "";
+  var gotText = false;
+
+  try {
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var lines = buf.split("\n"); buf = lines.pop();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line.startsWith("data:")) continue;
+        var raw = line.slice(5).trim();
+        if (raw === "[DONE]") break;
+        var evt; try { evt = JSON.parse(raw); } catch(_) { continue; }
+        if (evt.type === "content_block_delta" && evt.delta && evt.delta.type === "text_delta") {
+          var t = evt.delta.text || "";
+          if (t) {
+            gotText = true; currentMD += t;
+            out.innerHTML = renderMD(currentMD) + '<span class="cursor"></span>';
+          }
+        }
+      }
+    }
+  } catch(e) { showErr("Stream error", e.message, "Try again."); resetBtn(); return; }
+
+  if (!gotText) { showErr("No content returned", "API responded but returned no text.", "Try again."); resetBtn(); return; }
+  out.innerHTML = renderMD(currentMD); setExports(true); resetBtn();
+}
+
+function resetBtn() {
+  var abtn = document.getElementById("abtn");
+  abtn.disabled = false; abtn.classList.remove("busy");
+  document.getElementById("status").classList.remove("vis");
+  var s = getComps();
+  document.getElementById("blbl").textContent =
+    s.length > 1 ? "Compare " + s.length + " Competitors" :
+    s.length === 1 ? "Analyze " + s[0] : "Analyze";
+}
+
+function showErr(title, detail, hint) {
+  var out = document.getElementById("out");
+  out.style.display = "block"; document.getElementById("ph").style.display = "none";
+  out.innerHTML = '<div class="err"><strong>\u26a0\ufe0f ' + title + "</strong>" +
+    (detail ? "<code>" + detail + "</code>" : "") +
+    (hint ? '<div style="color:var(--g100);font-size:11px;margin-top:.3rem">' + hint + "</div>" : "") +
+    "</div>";
+}
+
+/* ── Markdown renderer ───────────────────────────────── */
+function renderMD(md) {
+  function inl(s) {
+    return s.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+            .replace(/\*\*(.+?)\*\*/g,     "<strong>$1</strong>")
+            .replace(/\*([^*\n]+?)\*/g,    "<em>$1</em>")
+            .replace(/`([^`]+)`/g,         "<code>$1</code>");
+  }
+  function trow(row, tag) {
+    return "<tr>" + row.split("|").slice(1, -1).map(function(c) {
+      return "<" + tag + ">" + inl(c.trim()) + "</" + tag + ">";
+    }).join("") + "</tr>";
+  }
+  var lines = md.split("\n"), out = [], inUl = false, inTbl = false;
+  function closeUl()  { if (inUl)  { out.push("</ul>");           inUl  = false; } }
+  function closeTbl() { if (inTbl) { out.push("</tbody></table>"); inTbl = false; } }
+  lines.forEach(function(line) {
+    if (/^## /.test(line))  { closeUl(); closeTbl(); out.push("<h2>" + inl(line.slice(3).trim()) + "</h2>"); return; }
+    if (/^### /.test(line)) { closeUl(); closeTbl(); out.push("<h3>" + inl(line.slice(4).trim()) + "</h3>"); return; }
+    if (/^[-*] /.test(line)) {
+      closeTbl(); if (!inUl) { out.push("<ul>"); inUl = true; }
+      out.push("<li>" + inl(line.slice(2).trim()) + "</li>"); return;
+    }
+    if (/^\|/.test(line)) {
+      closeUl();
+      if (/^\|[-| :]+\|$/.test(line)) return;
+      if (!inTbl) { out.push("<table><thead>" + trow(line, "th") + "</thead><tbody>"); inTbl = true; }
+      else out.push(trow(line, "td"));
+      return;
+    }
+    if (line.trim() === "") { closeUl(); closeTbl(); out.push("<br>"); return; }
+    closeUl(); closeTbl(); out.push("<p>" + inl(line.trim()) + "</p>");
+  });
+  closeUl(); closeTbl(); return out.join("");
+}
+
+/* ── Copy Markdown ───────────────────────────────────── */
+function copyMD() {
+  if (!currentMD) return;
+  navigator.clipboard.writeText(currentMD).then(function() { alert("Copied \u2705"); });
+}
+
+/* ── Export Word ─────────────────────────────────────── */
+function exportWord() {
+  if (!currentMD) return;
+  var title = "Competitor Intelligence: " + currentComps.join(" vs ");
+  var doc = [
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><style>',
+    "body{font-family:Calibri,sans-serif;font-size:11pt;margin:2.5cm 2cm}",
+    "h1{color:#2563eb;font-size:20pt}",
+    "h2{color:#2563eb;font-size:13pt;border-bottom:2px solid #f59e0b;padding-bottom:3pt;margin-top:12pt}",
+    "h3{color:#0f172a;font-size:11pt;margin-top:8pt}",
+    "p,li{margin:3pt 0;line-height:1.5;font-size:11pt} ul{padding-left:16pt}",
+    "table{border-collapse:collapse;width:100%;font-size:10pt;margin:6pt 0}",
+    "th{background:#2563eb;color:#fff;padding:4pt 7pt;text-align:left}",
+    "td{padding:3pt 7pt;border-bottom:1px solid #e2e8f0} tr:nth-child(even) td{background:#f8faff}",
+    "</style></head><body>",
+    "<p style=\"color:#2563eb;font-weight:700;font-size:10pt\">Competitor Intelligence Report &middot; Public Data Only</p>",
+    "<h1>" + title + "</h1>",
+    "<hr style=\"border:none;border-top:3px solid #f59e0b;margin:8pt 0\">",
+    renderMD(currentMD),
+    "</body></html>",
+  ].join("");
+  var blob = new Blob(["\ufeff" + doc], { type: "application/msword" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "intel_" + currentComps.join("_vs_") + ".doc";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ── Export Slides ───────────────────────────────────── */
+function exportSlides() {
+  if (!currentMD) return;
+  var title = "Competitor Intelligence: " + currentComps.join(" vs ");
+  var sections = [], cur = null;
+  currentMD.split("\n").forEach(function(line) {
+    if (/^## /.test(line)) {
+      if (cur) sections.push(cur);
+      cur = { title: line.slice(3).trim(), bullets: [], tbl: null };
+    } else if (cur) {
+      var l = line.trim();
+      if (/^\|/.test(l) && !/^\|[-| :]+\|/.test(l)) {
+        if (!cur.tbl) cur.tbl = { headers: null, rows: [] };
+        var cells = l.split("|").slice(1, -1).map(function(c) { return c.trim(); });
+        if (!cur.tbl.headers) cur.tbl.headers = cells; else cur.tbl.rows.push(cells);
+      } else if (/^[-*] /.test(l)) {
+        cur.bullets.push(l.slice(2).trim());
+      } else if (l && !/^#/.test(l)) {
+        var c = l.replace(/\*+/g, "").trim(); if (c) cur.bullets.push(c);
+      }
+    }
+  });
+  if (cur) sections.push(cur);
+
+  var h = [
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + title + "</title><style>",
+    "*{box-sizing:border-box;margin:0;padding:0} body{font-family:'Segoe UI',sans-serif;background:#0d0d0d}",
+    ".slide{width:100vw;min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:5vh 8vw;border-bottom:4px solid #f59e0b}",
+    ".cover{background:#0f172a;color:#fff} .sec{background:#2563eb;color:#fff} .cont{background:#fff;color:#1e293b}",
+    ".tag{background:#f59e0b;color:#0f172a;font-size:10px;font-weight:700;padding:3px 12px;border-radius:20px;text-transform:uppercase;display:inline-block;margin-bottom:14px}",
+    ".ctitle{font-size:clamp(24px,4vw,42px);font-weight:900;line-height:1.2;margin-bottom:12px}",
+    ".csub{font-size:clamp(13px,1.5vw,17px);color:rgba(255,255,255,.6)}",
+    ".stitle{font-size:clamp(22px,3.5vw,40px);font-weight:900}",
+    ".h{font-size:clamp(16px,2vw,22px);font-weight:800;color:#2563eb;border-bottom:3px solid #f59e0b;padding-bottom:8px;margin-bottom:18px}",
+    "ul{list-style:none} li{padding:8px 0 8px 20px;position:relative;font-size:clamp(12px,1.4vw,16px);line-height:1.5;border-bottom:1px solid #f0f0f0}",
+    "li:before{content:'\u25b8';color:#2563eb;position:absolute;left:0}",
+    "table{width:100%;border-collapse:collapse;font-size:clamp(10px,1.1vw,13px);margin-top:12px}",
+    "th{background:#2563eb;color:#fff;padding:8px 12px;text-align:left;white-space:nowrap}",
+    "td{padding:6px 12px;border-bottom:1px solid #e2e8f0} tr:nth-child(even) td{background:#f8faff}",
+    ".fbar{position:fixed;bottom:0;left:0;right:0;background:#f59e0b;color:#0f172a;font-size:10px;font-weight:700;padding:5px 20px;display:flex;justify-content:space-between;z-index:99}",
+    "@media print{.slide{page-break-after:always}.fbar{display:none}}",
+    "</style></head><body>",
+    '<div class="fbar"><span>Competitor Intelligence</span><span>Public data only &mdash; Powered by Claude AI</span></div>',
+    '<div class="slide cover">',
+    '<span class="tag">AI-Powered &middot; Public Knowledge</span>',
+    '<div class="ctitle">' + title + "</div>",
+    '<div class="csub">Generated ' + new Date().toLocaleDateString() + "</div>",
+    "</div>",
+  ];
+
+  sections.forEach(function(sec) {
+    h.push('<div class="slide sec"><div class="stitle">' + sec.title + "</div></div>");
+    var sz = 7, i = 0;
+    do {
+      var chunk = sec.bullets.slice(i, i + sz);
+      if (!chunk.length && !sec.tbl) break;
+      h.push('<div class="slide cont"><div class="h">' + sec.title + (i > 0 ? " (cont.)" : "") + "</div>");
+      if (chunk.length) {
+        h.push("<ul>");
+        chunk.forEach(function(b) { h.push("<li>" + b + "</li>"); });
+        h.push("</ul>");
+      }
+      if (sec.tbl && i === 0) {
+        h.push("<table>");
+        if (sec.tbl.headers) h.push("<tr>" + sec.tbl.headers.map(function(c) { return "<th>" + c + "</th>"; }).join("") + "</tr>");
+        sec.tbl.rows.forEach(function(row) { h.push("<tr>" + row.map(function(c) { return "<td>" + c + "</td>"; }).join("") + "</tr>"); });
+        h.push("</table>");
+      }
+      h.push("</div>"); i += sz;
+    } while (i < sec.bullets.length);
+  });
+  h.push("</body></html>");
+
+  var blob = new Blob([h.join("\n")], { type: "text/html" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "slides_" + currentComps.join("_vs_") + ".html";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
