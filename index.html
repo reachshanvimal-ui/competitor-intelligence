@@ -36,7 +36,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 .layout{display:grid;grid-template-columns:300px 1fr;flex:1;overflow:hidden;height:calc(100vh - 54px - 28px)}
 .sidebar{background:#fff;border-right:1px solid var(--g50);
          padding:.85rem;overflow-y:auto;display:flex;flex-direction:column;gap:.8rem}
-.main{padding:1rem;overflow-y:auto;display:flex;flex-direction:column;gap:.85rem}
+/* main never scrolls — ocard absorbs leftover height and scrolls itself */
+.main{padding:1rem;overflow:hidden;display:flex;flex-direction:column;gap:.85rem;height:100%}
 
 /* ── Sidebar labels ──────────────────────────────────── */
 .slabel{font-size:10px;font-weight:700;color:var(--g100);
@@ -125,8 +126,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
 /* ── Output card ─────────────────────────────────────── */
+/* flex:1 + min-height:0 lets the card shrink/grow to fill remaining space */
+/* overflow-y:auto makes the report scroll inside the card, not the whole page */
 .ocard{background:#fff;border-radius:12px;border:1px solid var(--g50);
-       padding:1.5rem;flex:1;box-shadow:0 1px 6px rgba(0,0,0,.06);min-height:320px}
+       padding:1.5rem;flex:1;min-height:0;overflow-y:auto;
+       box-shadow:0 1px 6px rgba(0,0,0,.06)}
 .ph{display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:.7rem;padding:2.5rem 1rem;text-align:center;color:var(--g100)}
 .ph-icon{width:64px;height:64px;background:linear-gradient(135deg,#eff6ff,#dbeafe);
@@ -166,7 +170,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 .footer a:hover{color:var(--blue)}
 
 @media(max-width:760px){
-  .layout{grid-template-columns:1fr;height:auto}
+  .layout{grid-template-columns:1fr;height:auto;overflow:visible}
+  .main{overflow:visible;height:auto}
+  .ocard{min-height:400px;overflow-y:visible}
   .sidebar{border-right:none;border-bottom:1px solid var(--g50)}
 }
 </style>
@@ -281,9 +287,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 <script>
 /* ── Data ────────────────────────────────────────────── */
 var COMPETITORS = [
+  { name:"Walmart",        emoji:"⭐", sector:"Mass Retail / E-commerce", primary:true  },
   { name:"Amazon",         emoji:"📦", sector:"E-commerce / Marketplace", primary:true  },
   { name:"eBay",           emoji:"🛒", sector:"E-commerce / Marketplace", primary:true  },
-  { name:"Target",         emoji:"🎯", sector:"Mass Retail",              primary:true  },
+  { name:"Target",         emoji:"🎯", sector:"Mass Retail",              primary:false },
   { name:"Costco",         emoji:"🏭", sector:"Membership Retail",        primary:false },
   { name:"Kroger",         emoji:"🥕", sector:"Grocery / Omnichannel",    primary:false },
   { name:"Dollar General", emoji:"💲", sector:"Discount Retail",          primary:false },
@@ -367,6 +374,7 @@ async function analyze() {
   var comps = getComps();
   var dims  = getDims();
   if (!comps.length) { alert("Select at least one competitor!"); return; }
+  if (comps.length === 1 && comps[0] === "Walmart") { alert("Select at least one competitor alongside Walmart!"); return; }
   if (!dims.length)  { alert("Select at least one focus area!"); return; }
 
   currentComps = comps; currentMD = "";

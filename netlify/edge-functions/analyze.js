@@ -36,6 +36,15 @@ export default async (request, context) => {
     return new Response("Missing competitors or dims", { status: 400 });
   }
 
+  // If Walmart is selected, it becomes the reference company (not a competitor)
+  const walmartSelected = competitors.includes("Walmart");
+  const peers           = competitors.filter((c) => c !== "Walmart");
+  const refCompany      = walmartSelected ? "Walmart" : "Reference Company";
+
+  if (!peers.length) {
+    return new Response("Select at least one competitor alongside Walmart", { status: 400 });
+  }
+
   /* ── Build prompt ────────────────────────────────── */
   const SYSTEM_PROMPT = `You are a competitive intelligence assistant specialising in retail and e-commerce.
 Provide clear, structured, business-ready insights for non-technical decision makers.
@@ -67,14 +76,14 @@ Rules:
 - Keep language simple, think like a product leader advising a CEO
 - Be concise and insight-driven`;
 
-  const subjects = [...competitors, "Reference Company"];
+  const subjects = [...peers, refCompany];
   const userMsg = [
-    `Produce a full competitive intelligence report comparing against: ${competitors.join(", ")}.`,
+    `Produce a full competitive intelligence report for ${refCompany}, comparing against: ${peers.join(", ")}.`,
     "",
     "Focus areas (cover ONLY these):",
     dims.map((d) => `- ${d}`).join("\n"),
     "",
-    `Mode: ${mode === "single" || competitors.length === 1 ? "deep-dive" : "multi-competitor comparison"}`,
+    `Mode: ${mode === "single" || peers.length === 1 ? "deep-dive" : "multi-competitor comparison"}`,
     `Section 2 order: ${subjects.join(", ")}`,
     `Section 3 table columns: ${subjects.join(", ")}. Rows = focus areas only.`,
     "",
