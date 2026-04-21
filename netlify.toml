@@ -1,3 +1,7 @@
 [[edge_functions]]
   function = "analyze"
   path     = "/api/analyze"
+
+[[edge_functions]]
+  function = "structure-slides"
+  path     = "/api/structure-slides"

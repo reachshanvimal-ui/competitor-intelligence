@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Competitor Intelligence — AI-Powered Analysis</title>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
 <meta name="description" content="AI-powered competitor intelligence tool. Select competitors, choose focus areas, get a structured 6-section report instantly.">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -251,9 +252,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     </div>
 
     <div class="ebar">
-      <button class="ebtn" id="btn-slides" onclick="exportSlides()" disabled>📊 Download Slides</button>
-      <button class="ebtn" id="btn-word"   onclick="exportWord()"   disabled>📄 Download Word</button>
-      <button class="ebtn" id="btn-copy"   onclick="copyMD()"       disabled>📋 Copy Markdown</button>
+      <button class="ebtn" id="btn-slides" onclick="exportSlides()" disabled>&#128202; Download PPT</button>
+      <button class="ebtn" id="btn-word"   onclick="exportWord()"   disabled>&#128196; Download Word</button>
+      <button class="ebtn" id="btn-copy"   onclick="copyMD()"       disabled>&#128203; Copy Markdown</button>
     </div>
 
     <div class="status" id="status">
@@ -528,84 +529,245 @@ function exportWord() {
   a.click(); URL.revokeObjectURL(a.href);
 }
 
-/* ── Export Slides ───────────────────────────────────── */
-function exportSlides() {
+/* ── Export PPT (real .pptx via Claude + pptxgenjs) ───────── */
+async function exportSlides() {
   if (!currentMD) return;
-  var title = "Competitor Intelligence: " + currentComps.join(" vs ");
-  var sections = [], cur = null;
-  currentMD.split("\n").forEach(function(line) {
-    if (/^## /.test(line)) {
-      if (cur) sections.push(cur);
-      cur = { title: line.slice(3).trim(), bullets: [], tbl: null };
-    } else if (cur) {
-      var l = line.trim();
-      if (/^\|/.test(l) && !/^\|[-| :]+\|/.test(l)) {
-        if (!cur.tbl) cur.tbl = { headers: null, rows: [] };
-        var cells = l.split("|").slice(1, -1).map(function(c) { return c.trim(); });
-        if (!cur.tbl.headers) cur.tbl.headers = cells; else cur.tbl.rows.push(cells);
-      } else if (/^[-*] /.test(l)) {
-        cur.bullets.push(l.slice(2).trim());
-      } else if (l && !/^#/.test(l)) {
-        var c = l.replace(/\*+/g, "").trim(); if (c) cur.bullets.push(c);
+  var btn = document.getElementById("btn-slides");
+  btn.disabled = true;
+  btn.textContent = "⏳ Structuring slides…";
+
+  // Step 1 — ask Claude to structure the markdown into slide JSON
+  var structResp;
+  try {
+    structResp = await fetch("/api/structure-slides", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        markdown: currentMD,
+        title:    "Competitor Intelligence: " + currentComps.join(" vs "),
+      }),
+    });
+  } catch(e) {
+    alert("Network error reaching slide service: " + e.message);
+    btn.disabled = false; btn.textContent = "📊 Download PPT"; return;
+  }
+
+  if (!structResp.ok) {
+    var errTxt = ""; try { errTxt = await structResp.text(); } catch(_) {}
+    alert("Slide structuring failed (" + structResp.status + "): " + errTxt.slice(0,200));
+    btn.disabled = false; btn.textContent = "📊 Download PPT"; return;
+  }
+
+  var deck;
+  try { deck = await structResp.json(); } catch(e) {
+    alert("Invalid slide data returned: " + e.message);
+    btn.disabled = false; btn.textContent = "📊 Download PPT"; return;
+  }
+
+  btn.textContent = "⏳ Building .pptx…";
+
+  // Step 2 — build the real .pptx with pptxgenjs
+  try {
+    var pptx = new PptxGenJS();
+    pptx.layout  = "LAYOUT_WIDE";       // 16:9  13.33″ x 7.5″
+    pptx.title   = "Competitor Intelligence";
+    pptx.subject = currentComps.join(" vs ");
+    pptx.author  = "AI Competitor Intelligence Tool";
+
+    // ── Brand palette ───────────────────────────────────────
+    var C = {
+      dark:    "0F172A",
+      blue:    "2563EB",
+      blueMid: "1D4ED8",
+      amber:   "F59E0B",
+      white:   "FFFFFF",
+      light:   "F8FAFC",
+      slate:   "475569",
+      border:  "E2E8F0",
+    };
+
+    var W = 13.33, H = 7.5;   // slide dimensions in inches
+
+    (deck.slides || []).forEach(function(slide) {
+      var s = pptx.addSlide();
+
+      // ── COVER ──────────────────────────────────────────────
+      if (slide.type === "cover") {
+        s.background = { color: C.dark };
+
+        // Amber accent bar (top)
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:0, w:W, h:0.08, fill:{ color:C.amber }, line:{ type:"none" }
+        });
+
+        // Badge
+        s.addText("AI‑POWERED · PUBLIC KNOWLEDGE ONLY", {
+          x:1.2, y:1.6, w:W-2.4, h:0.35,
+          fontSize:10, bold:true, color:C.amber,
+          align:"center", fontFace:"Calibri"
+        });
+
+        // Title
+        s.addText(slide.title || "Competitor Intelligence", {
+          x:1.2, y:2.1, w:W-2.4, h:1.8,
+          fontSize:36, bold:true, color:C.white,
+          align:"center", fontFace:"Calibri",
+          charSpacing:0.5
+        });
+
+        // Divider line
+        s.addShape(pptx.ShapeType.rect, {
+          x:2.5, y:4.05, w:W-5, h:0.04, fill:{ color:C.amber }, line:{ type:"none" }
+        });
+
+        // Subtitle / date
+        s.addText(slide.subtitle || "", {
+          x:1.2, y:4.2, w:W-2.4, h:0.5,
+          fontSize:14, color:"94A3B8",
+          align:"center", fontFace:"Calibri"
+        });
+
+        // Bottom bar
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:H-0.4, w:W, h:0.4, fill:{ color:"1E3A8A" }, line:{ type:"none" }
+        });
+        s.addText("Powered by Claude AI · Uses only publicly available information", {
+          x:0, y:H-0.38, w:W, h:0.35,
+          fontSize:9, color:C.white, align:"center", fontFace:"Calibri"
+        });
+
+      // ── SECTION DIVIDER ───────────────────────────────────
+      } else if (slide.type === "section") {
+        s.background = { color:C.blue };
+
+        // Side accent
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:0, w:0.12, h:H, fill:{ color:C.amber }, line:{ type:"none" }
+        });
+
+        s.addText(slide.title || "", {
+          x:0.5, y:2.6, w:W-1, h:1.6,
+          fontSize:32, bold:true, color:C.white,
+          align:"center", fontFace:"Calibri"
+        });
+
+        // Bottom bar
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:H-0.35, w:W, h:0.35, fill:{ color:"1D4ED8" }, line:{ type:"none" }
+        });
+        s.addText("Competitor Intelligence", {
+          x:0, y:H-0.33, w:W, h:0.3,
+          fontSize:9, color:"BFD9FF", align:"center", fontFace:"Calibri"
+        });
+
+      // ── BULLETS ────────────────────────────────────────────
+      } else if (slide.type === "bullets") {
+        s.background = { color:C.white };
+
+        // Blue title bar
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:0, w:W, h:1.1, fill:{ color:C.blue }, line:{ type:"none" }
+        });
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:1.1, w:W, h:0.06, fill:{ color:C.amber }, line:{ type:"none" }
+        });
+        s.addText(slide.title || "", {
+          x:0.4, y:0.15, w:W-0.8, h:0.8,
+          fontSize:20, bold:true, color:C.white, fontFace:"Calibri"
+        });
+
+        // Bullets
+        var bullets = (slide.bullets || []).slice(0, 7);
+        bullets.forEach(function(txt, i) {
+          s.addShape(pptx.ShapeType.rect, {
+            x:0.45, y:1.45 + i*0.76, w:0.06, h:0.06,
+            fill:{ color:C.amber }, line:{ type:"none" }
+          });
+          s.addText(txt, {
+            x:0.65, y:1.35 + i*0.76, w:W-1.1, h:0.7,
+            fontSize:13, color:"1E293B", fontFace:"Calibri",
+            valign:"middle"
+          });
+        });
+
+        addFooter(s, pptx, C, W, H);
+
+      // ── TABLE ──────────────────────────────────────────────
+      } else if (slide.type === "table") {
+        s.background = { color:C.white };
+
+        // Blue title bar
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:0, w:W, h:1.1, fill:{ color:C.blue }, line:{ type:"none" }
+        });
+        s.addShape(pptx.ShapeType.rect, {
+          x:0, y:1.1, w:W, h:0.06, fill:{ color:C.amber }, line:{ type:"none" }
+        });
+        s.addText(slide.title || "Comparison Table", {
+          x:0.4, y:0.15, w:W-0.8, h:0.8,
+          fontSize:20, bold:true, color:C.white, fontFace:"Calibri"
+        });
+
+        var headers = (slide.headers || []);
+        var rows    = (slide.rows    || []);
+
+        if (headers.length && rows.length) {
+          var colW    = (W - 0.6) / headers.length;
+          var rowH    = Math.min(0.55, (H - 1.9) / (rows.length + 1));
+          var startY  = 1.3;
+          var startX  = 0.3;
+
+          // Header row
+          headers.forEach(function(h, ci) {
+            s.addShape(pptx.ShapeType.rect, {
+              x:startX + ci*colW, y:startY, w:colW, h:rowH,
+              fill:{ color:C.blue }, line:{ color:C.border, pt:0.5 }
+            });
+            s.addText(h, {
+              x:startX + ci*colW + 0.05, y:startY + 0.04, w:colW - 0.1, h:rowH - 0.08,
+              fontSize:10, bold:true, color:C.white, fontFace:"Calibri", valign:"middle"
+            });
+          });
+
+          // Data rows
+          rows.forEach(function(row, ri) {
+            var bg = ri % 2 === 0 ? C.white : C.light;
+            row.forEach(function(cell, ci) {
+              s.addShape(pptx.ShapeType.rect, {
+                x:startX + ci*colW, y:startY + (ri+1)*rowH, w:colW, h:rowH,
+                fill:{ color:bg }, line:{ color:C.border, pt:0.5 }
+              });
+              s.addText(cell, {
+                x:startX + ci*colW + 0.05, y:startY + (ri+1)*rowH + 0.03, w:colW - 0.1, h:rowH - 0.06,
+                fontSize:9, color:"334155", fontFace:"Calibri", valign:"middle", wrap:true
+              });
+            });
+          });
+        }
+
+        addFooter(s, pptx, C, W, H);
       }
-    }
+    });
+
+    var fileName = "intel_" + currentComps.join("_vs_") + ".pptx";
+    await pptx.writeFile({ fileName: fileName });
+
+  } catch(e) {
+    alert("PPT generation failed: " + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = "📊 Download PPT";
+}
+
+function addFooter(slide, pptx, C, W, H) {
+  slide.addShape(pptx.ShapeType.rect, {
+    x:0, y:H-0.3, w:W, h:0.3, fill:{ color:C.dark }, line:{ type:"none" }
   });
-  if (cur) sections.push(cur);
-
-  var h = [
-    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + title + "</title><style>",
-    "*{box-sizing:border-box;margin:0;padding:0} body{font-family:'Segoe UI',sans-serif;background:#0d0d0d}",
-    ".slide{width:100vw;min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:5vh 8vw;border-bottom:4px solid #f59e0b}",
-    ".cover{background:#0f172a;color:#fff} .sec{background:#2563eb;color:#fff} .cont{background:#fff;color:#1e293b}",
-    ".tag{background:#f59e0b;color:#0f172a;font-size:10px;font-weight:700;padding:3px 12px;border-radius:20px;text-transform:uppercase;display:inline-block;margin-bottom:14px}",
-    ".ctitle{font-size:clamp(24px,4vw,42px);font-weight:900;line-height:1.2;margin-bottom:12px}",
-    ".csub{font-size:clamp(13px,1.5vw,17px);color:rgba(255,255,255,.6)}",
-    ".stitle{font-size:clamp(22px,3.5vw,40px);font-weight:900}",
-    ".h{font-size:clamp(16px,2vw,22px);font-weight:800;color:#2563eb;border-bottom:3px solid #f59e0b;padding-bottom:8px;margin-bottom:18px}",
-    "ul{list-style:none} li{padding:8px 0 8px 20px;position:relative;font-size:clamp(12px,1.4vw,16px);line-height:1.5;border-bottom:1px solid #f0f0f0}",
-    "li:before{content:'\u25b8';color:#2563eb;position:absolute;left:0}",
-    "table{width:100%;border-collapse:collapse;font-size:clamp(10px,1.1vw,13px);margin-top:12px}",
-    "th{background:#2563eb;color:#fff;padding:8px 12px;text-align:left;white-space:nowrap}",
-    "td{padding:6px 12px;border-bottom:1px solid #e2e8f0} tr:nth-child(even) td{background:#f8faff}",
-    ".fbar{position:fixed;bottom:0;left:0;right:0;background:#f59e0b;color:#0f172a;font-size:10px;font-weight:700;padding:5px 20px;display:flex;justify-content:space-between;z-index:99}",
-    "@media print{.slide{page-break-after:always}.fbar{display:none}}",
-    "</style></head><body>",
-    '<div class="fbar"><span>Competitor Intelligence</span><span>Public data only &mdash; Powered by Claude AI</span></div>',
-    '<div class="slide cover">',
-    '<span class="tag">AI-Powered &middot; Public Knowledge</span>',
-    '<div class="ctitle">' + title + "</div>",
-    '<div class="csub">Generated ' + new Date().toLocaleDateString() + "</div>",
-    "</div>",
-  ];
-
-  sections.forEach(function(sec) {
-    h.push('<div class="slide sec"><div class="stitle">' + sec.title + "</div></div>");
-    var sz = 7, i = 0;
-    do {
-      var chunk = sec.bullets.slice(i, i + sz);
-      if (!chunk.length && !sec.tbl) break;
-      h.push('<div class="slide cont"><div class="h">' + sec.title + (i > 0 ? " (cont.)" : "") + "</div>");
-      if (chunk.length) {
-        h.push("<ul>");
-        chunk.forEach(function(b) { h.push("<li>" + b + "</li>"); });
-        h.push("</ul>");
-      }
-      if (sec.tbl && i === 0) {
-        h.push("<table>");
-        if (sec.tbl.headers) h.push("<tr>" + sec.tbl.headers.map(function(c) { return "<th>" + c + "</th>"; }).join("") + "</tr>");
-        sec.tbl.rows.forEach(function(row) { h.push("<tr>" + row.map(function(c) { return "<td>" + c + "</td>"; }).join("") + "</tr>"); });
-        h.push("</table>");
-      }
-      h.push("</div>"); i += sz;
-    } while (i < sec.bullets.length);
+  slide.addText("Competitor Intelligence · AI-generated · Public data only", {
+    x:0, y:H-0.28, w:W, h:0.26,
+    fontSize:8, color:"64748B", align:"center", fontFace:"Calibri"
   });
-  h.push("</body></html>");
-
-  var blob = new Blob([h.join("\n")], { type: "text/html" });
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "slides_" + currentComps.join("_vs_") + ".html";
-  a.click(); URL.revokeObjectURL(a.href);
 }
 </script>
 </body>
