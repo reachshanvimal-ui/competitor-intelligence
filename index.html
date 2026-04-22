@@ -622,10 +622,38 @@ async function exportSlides() {
         title:"Competitor Intelligence: " + currentComps.join(" vs ") }),
     });
   } catch(e) { alert("Network error: " + e.message); resetPptBtn(btn); return; }
-  if (!resp.ok) { alert("Slide error " + resp.status); resetPptBtn(btn); return; }
+  if (!resp.ok) { alert("Slide error " + resp.status + " — check Netlify logs"); resetPptBtn(btn); return; }
 
+  // Collect the SSE stream (stream:true avoids 30s edge-function timeout)
+  var reader  = resp.body.getReader();
+  var decoder = new TextDecoder();
+  var buf = "", raw = "";
+  try {
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var lines = buf.split("\n"); buf = lines.pop();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line.startsWith("data:")) continue;
+        var evtRaw = line.slice(5).trim();
+        if (evtRaw === "[DONE]") break;
+        var evt; try { evt = JSON.parse(evtRaw); } catch(_) { continue; }
+        if (evt.type === "content_block_delta" && evt.delta && evt.delta.type === "text_delta") {
+          raw += (evt.delta.text || "");
+        }
+      }
+    }
+  } catch(e) { alert("Stream error: " + e.message); resetPptBtn(btn); return; }
+
+  // Strip accidental markdown fences and parse JSON
+  var jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   var deck;
-  try { deck = await resp.json(); } catch(e) { alert("Bad JSON: "+e.message); resetPptBtn(btn); return; }
+  try { deck = JSON.parse(jsonStr); } catch(e) {
+    alert("❌ Claude returned invalid JSON.\n\nPreview: " + jsonStr.slice(0, 200));
+    resetPptBtn(btn); return;
+  }
 
   btn.textContent = "⏳ Fetching logos…";
   var allNames = new Set(currentComps);

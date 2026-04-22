@@ -1,18 +1,23 @@
 /**
- * /api/structure-slides — Claude produces a tight EXECUTIVE deck JSON.
+ * /api/structure-slides — streams Claude's slide JSON to the browser.
  *
- * Slide types (all handled by pptxgenjs in the browser):
- *   cover      — title, competitors[], date
- *   kpi        — title, metrics[{label, value, unit, delta, sentiment}]
- *   exec-summary — headline, points[string] (max 5)
- *   competitor — name, domain, tagline, stat{label,value}, bullets[string] (max 4)
- *   comparison — title, headers[], rows[][]
- *   implications — risks[string], opportunities[string] (max 4 each)
- *   actions    — title, actions[{number,title,detail,owner,timeline}] (max 5)
+ * Uses stream:true (same pattern as analyze.js + six-pager.js) so the
+ * connection stays alive for the full generation time. The browser collects
+ * all text_delta chunks, assembles the JSON string, then parses it locally.
+ *
+ * Slide types returned:
+ *   cover | kpi | exec-summary | competitor | comparison | implications | actions
  */
 export default async (request) => {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: cors() });
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin":  "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
   }
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
@@ -25,102 +30,77 @@ export default async (request) => {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return new Response("Missing API key", { status: 500 });
 
-  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const today = new Date().toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  });
 
   const SYSTEM = `You are an elite McKinsey-style presentation designer creating a C-suite executive slide deck.
 
-Return ONLY valid JSON — no markdown fences, no explanation.
+Return ONLY valid JSON — no markdown fences, no explanation, no extra text before or after.
 
 JSON schema:
 {
   "slides": [
-    {
-      "type": "cover",
-      "title": "<report title, max 10 words>",
-      "competitors": ["<name>", ...],
-      "date": "<today's date>"
-    },
-    {
-      "type": "kpi",
-      "title": "At a Glance",
-      "metrics": [
-        { "label": "<metric name>", "value": "<number>", "unit": "<unit>", "delta": "<+/-X%>", "sentiment": "positive|negative|neutral" }
-      ]
-    },
-    {
-      "type": "exec-summary",
-      "headline": "<one powerful sentence, max 20 words>",
-      "points": ["<insight 1>", "<insight 2>", "<insight 3>", "<insight 4>", "<insight 5>"]
-    },
-    {
-      "type": "competitor",
-      "name": "<company name>",
-      "domain": "<company.com>",
-      "tagline": "<their brand position, max 8 words>",
-      "stat": { "label": "<key metric label>", "value": "<impressive number>" },
-      "bullets": ["<key move>", "<strength>", "<weakness>", "<Walmart implication>"]
-    },
-    {
-      "type": "comparison",
-      "title": "Head-to-Head Comparison",
-      "headers": ["Focus Area", "<company1>", "<company2>", "..."],
-      "rows": [["<area>", "<rating or text>", "..."]]
-    },
-    {
-      "type": "implications",
-      "risks": ["<risk 1>", "<risk 2>", "<risk 3>"],
-      "opportunities": ["<opp 1>", "<opp 2>", "<opp 3>"]
-    },
-    {
-      "type": "actions",
-      "title": "Recommended Actions",
-      "actions": [
-        { "number": 1, "title": "<action title>", "detail": "<one line detail>", "owner": "<who>", "timeline": "<when>" }
-      ]
-    }
+    { "type": "cover",        "title": string, "competitors": string[], "date": string },
+    { "type": "kpi",          "title": string, "metrics": [{ "label": string, "value": string, "unit": string, "delta": string, "sentiment": "positive"|"negative"|"neutral" }] },
+    { "type": "exec-summary", "headline": string, "points": string[] },
+    { "type": "competitor",   "name": string, "domain": string, "tagline": string, "stat": { "label": string, "value": string }, "bullets": string[] },
+    { "type": "comparison",   "title": string, "headers": string[], "rows": string[][] },
+    { "type": "implications", "risks": string[], "opportunities": string[] },
+    { "type": "actions",      "title": string, "actions": [{ "number": number, "title": string, "detail": string, "owner": string, "timeline": string }] }
   ]
 }
 
-STRICT RULES — executives see these on a projector:
+STRICT RULES:
 - Max 4 bullets per competitor slide. Each bullet max 15 words.
-- Exec summary: max 5 points, each max 18 words. Headline must be assertive, not vague.
-- KPI: 4 metrics max. Use real publicly-known numbers; label estimates with (est.)
-- Implications: max 4 risks, max 4 opportunities. Sharp, specific.
-- Actions: max 5. Must have owner role and specific timeline.
-- NEVER use jargon. Write like a confident product leader briefing the CEO.
-- One competitor slide per company in the report. Include a competitor slide for every company mentioned.`;
+- exec-summary: max 5 points each max 18 words. Headline: assertive, max 20 words.
+- kpi: exactly 4 metrics. Use real publicly-known numbers; label estimates (est.)
+- implications: max 4 risks, max 4 opportunities. Specific, sharp.
+- actions: max 5. Must have owner role and specific timeline.
+- One competitor slide per company mentioned in the report. Include ALL companies.
+- NEVER use jargon. Write like a confident product leader briefing the CEO.`;
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+  const userMsg = [
+    `Report title: "${title}"`,
+    `Date: ${today}`,
+    `Competitors: ${competitors.join(", ")}`,
+    "",
+    "Report to convert:",
+    markdown,
+  ].join("\n");
+
+  const anthropicResp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Api-Key": apiKey, "anthropic-version": "2023-06-01" },
+    headers: {
+      "Content-Type":      "application/json",
+      "X-Api-Key":         apiKey,
+      "anthropic-version": "2023-06-01",
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5", max_tokens: 8192, system: SYSTEM,
-      messages: [{ role: "user", content: `Report title: "${title}"\nDate: ${today}\nCompetitors: ${competitors.join(", ")}\n\nReport:\n${markdown}` }],
+      model:      "claude-sonnet-4-5",
+      max_tokens: 8192,
+      stream:     true,
+      system:     SYSTEM,
+      messages:   [{ role: "user", content: userMsg }],
     }),
   });
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    return new Response(`Anthropic error ${resp.status}: ${err}`, { status: resp.status });
+  if (!anthropicResp.ok) {
+    const err = await anthropicResp.text();
+    return new Response(`Anthropic API error ${anthropicResp.status}: ${err}`, {
+      status: anthropicResp.status,
+    });
   }
 
-  const data = await resp.json();
-  const raw  = (data?.content?.[0]?.text ?? "")
-    .replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch {
-    return new Response(JSON.stringify({ error: "Claude returned invalid JSON", raw: raw.slice(0, 500) }),
-      { status: 500, headers: { "Content-Type": "application/json", ...cors() } });
-  }
-
-  return new Response(JSON.stringify(parsed), {
-    headers: { "Content-Type": "application/json", ...cors() },
+  /* Stream straight through — browser collects + parses JSON locally */
+  return new Response(anthropicResp.body, {
+    status: 200,
+    headers: {
+      "Content-Type":                "text/event-stream",
+      "Cache-Control":               "no-cache",
+      "Access-Control-Allow-Origin": "*",
+    },
   });
 };
-
-function cors() {
-  return { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type" };
-}
 
 export const config = { path: "/api/structure-slides" };
